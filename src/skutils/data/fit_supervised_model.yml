@@ -1,0 +1,39 @@
+inputs:
+  path    : null
+  features: null
+  target  : null
+  index   : null
+  positive_class : null
+outputs:
+  save_test_scores         : true # Would this ever be false?
+  save_train_scores        : false
+  save_estimator           : false
+  save_test_predictions    : false
+  save_train_predictions   : false
+  # TODO: Default to saving based off save_test_scores but allow user to
+  # override in case they want to turn off cv outputs.
+  save_cv_test_scores      : true # Would this ever be false?
+  save_cv_train_scores     : false
+  save_cv_estimators       : false
+  save_cv_test_predictions : false
+  save_cv_train_predictions: false
+  save_cv_indices          : false
+  save_feature_importances : false
+random_seed: 0
+preprocess: {}
+train_test_split:
+  shuffle: false
+  test_size: 0.2
+estimator:
+  name: ExtraTreesClassifier
+  # n_estimators: 10
+cv_iterator:
+  name: KFold
+  # n_splits: 5
+model_selector: null
+fit:
+  # return_* keywords determined by save_* parameters in outputs section so no
+  # need to manually set them here
+  scoring:
+  - accuracy
+  - neg_log_loss
