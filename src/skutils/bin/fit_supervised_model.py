@@ -8,29 +8,31 @@ import logging
 from pathlib import Path
 import time
 from typing import (
+    # TODO: Update to 3.9 type hints
     Any,
     Collection,
-    Dict,
     Iterable,
     List,
     Literal,
+    NotRequired,
     Optional,
     Tuple,
+    TypedDict,
     Union
 )
 
 # 3rd party
 import numpy as np
-from numpy.typing import NDArray
 import pandas as pd
 from pandas import DataFrame, Series
 from sklearn.base import BaseEstimator
 from sklearn.metrics import get_scorer
-import sklearn.model_selection
 from sklearn.model_selection import cross_validate
 
 # 1st party
 from skutils.data import get_default_cfg_supervised
+from skutils.import_utils import import_object
+from skutils.train_test_iterators import TrainOnAllWrapper, TrainTestIterable
 
 # Globals
 log = logging.getLogger(Path(__file__).stem)
@@ -85,21 +87,36 @@ def main():
     # save_results(results)
     # save_visualizations(results)
 
-def fit_supervised_model(data: DataFrame, cfg: dict) -> dict:
+class FitSupervisedModelResults(TypedDict):
+    fits                : DataFrame
+    is_test_data        : NotRequired[DataFrame]
+    y_pred              : NotRequired[DataFrame]
+    feature_importances : NotRequired[Series]
+
+def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResults:
     icfg = cfg['inputs']
     ocfg = cfg['outputs']
 
     # reformat_cfg()
     ########################################
+    # Checks
+    if icfg['target'] is None:
+        raise ValueError('Must specify target feature')
+    if not any(ocfg.values()):
+        log.info('All outputs disabled')
+
+    ########################################
     # Setup
     log.info('Setting up for fit')
     random_gen   = np.random.default_rng(cfg['random_seed'])
     random_state = np.random.RandomState(random_gen.bit_generator)
-    estimator    = build_estimator(**cfg['estimator'])
-    cv           = build_cv_iterator(**cfg['cv_iterator'])
 
-    n_splits      = cv.get_n_splits()
-    split_names   = list(range(n_splits))
+    train_test_iterator = build_train_test_iterator(
+        **cfg['train_test_iterator'],
+        train_on_all = cfg['train_on_all'],
+        random_state=random_state,
+    )
+    estimator = build_estimator(**cfg['estimator'])
 
     ########################################
     log.info('Reading in data')
@@ -116,114 +133,120 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> dict:
     )
     feature_names = X.columns.tolist()
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y,
-        random_state=random_state,
-        **cfg['train_test_split'],
-    )
-    return_test_predictions = X_test is not None and y_test is not None
-
     ########################################
-    if cfg['model_selector'] is None:
-        log.info('Running cross-validation')
-        fit_results = cross_validate(
-            estimator,
-            X_train,
-            y_train,
-            cv=cv,
-            return_train_score = ocfg['save_cv_train_scores'],
-            return_estimator   = ocfg['save_cv_estimators'],
-            return_indices     = ocfg['save_cv_indices'],
-            **cfg['fit']
-        )
-        fit_results, is_test_data = _reformat_cross_validate_results(
-            fit_results,
-            index = X_train.index,
-            columns = split_names,
-        )
-    else:
+    y_pred = None
+    is_test_data = None
+    feature_importances = None
+    if cfg['model_selector'] is not None:
         # TODO: Implement evaluation of multiple models with different
         # parameters. Not possible to save out as much information so the
         # outputs will be quite different for this use case
         model_selector = build_model_selector(estimator, **cfg['model_selector'])
-        results_per_model = model_selector.fit(X_train, y_train, cv=cv, **cfg['fit'])
-
-    log.info('Fitting estimator on all training data')
-    results_all : Dict[str, Any] = {}
-    start = time.perf_counter()
-    estimator_all = estimator.fit(X_train, y_train)
-    results_all['fit_time'] = time.perf_counter() - start
-    # TODO: Does this need to be cloned to avoid it getting updated if
-    # estimator_all.fit is called again?
-    results_all['estimator'] = estimator_all
-
-    y_train_pred = y_cv_test_pred = None
-    if ocfg['save_train_predictions']:
-        log.info('Getting training data predictions')
-        y_train_pred = predict(
-            fit_results['estimator'].to_list(),
-            X_train,
-            keys  = fit_results.index.to_list(),
-            names = ['split'],
+        model_selector.fit(X, y, cv=train_test_iterator, **cfg['fit'])
+        # fit_results.update(...)
+    else:
+        log.info('Running training and testing')
+        save_predictions  = ocfg['save_train_predictions'] or ocfg['save_test_predictions']
+        return_estimators = ocfg['save_estimators'] or ocfg['save_feature_importances'] or save_predictions
+        return_indices    = ocfg['save_indices'] or save_predictions
+        # TODO: Implement general train_test function that has the
+        # parallelization of cross_validate but allows the user full
+        # configuration to, say, save out train predictions and scores
+        # without evaluating on test set.
+        fit_results = cross_validate(
+            estimator,
+            X,
+            y,
+            cv                 = train_test_iterator,
+            return_train_score = ocfg['save_train_scores'],
+            return_estimator   = return_estimators,
+            return_indices     = return_indices,
+            **cfg['fit'],
         )
-        y_train_all_pred, train_all_score = predict_and_score(estimator_all, X_train, y_train, scoring=cfg['fit']['scoring'])
-        y_train_pred = pd.concat(
-            [
-                y_train_pred,
-                y_train_all_pred.pipe(
-                    add_index_level,
-                    label = 'all',
-                    name  = y_train_pred.columns.names[0],
-                    axis  = 1,
-                ),
-            ],
-            axis=1,
+
+        if not ocfg['save_test_scores']:
+            # cross_validate always saves out test scores so for now just delete
+            # these if not requested.
+            fit_results = {k:v for k,v in fit_results.items() if not k.startswith('test_')}
+            if not ocfg['save_train_scores']:
+                del fit_results['score_time']
+
+        n_splits = len(fit_results['fit_time'])
+        # TODO: Allow user to provide format string (e.g. "Split {i}")
+        split_names = cfg['split_names'] or list(range(n_splits))
+        if cfg['train_on_all']:
+            split_names[-1] = 'all'
+        fit_results, is_test_data = to_cross_validate_dataframes(
+            fit_results,
+            data_index = X.index,
+            split_names = split_names,
         )
-        results_all.update({
-            # Add prefix to metrics columns (e.g. train_accuracy) but not others
-            # (e.g. score_time)
-            f'train_{k}' if k not in fit_results else k : v
-            for k,v in train_all_score.items()
-        })
-        # is_partitioned_by_val_folds = is_test_data is not None and (is_test_data.sum(axis=1) == 1).all()
-        # TODO: Handle user only wanting to save validation predictions and not
-        # full training predictions
-        if ocfg['save_cv_test_predictions']:
-            y_cv_test_pred = combine_test_results(
-                y_train_pred[split_names],
-                is_test_data[split_names],
+
+        if save_predictions:
+            assert is_test_data is not None
+            save_only_train_pred = not ocfg['save_test_predictions']
+            save_only_test_pred  = not ocfg['save_train_predictions']
+
+            if save_only_test_pred:
+                masks = (mask for _, mask in is_test_data.items())
+            elif save_only_train_pred:
+                masks = (~mask for _, mask in is_test_data.items())
+            else:
+                masks = (mask.notna() for _, mask in is_test_data.items())
+
+            y_pred = pd.concat(
+                [
+                    predict(est, X[mask])
+                    for est, mask in zip(fit_results['estimator'], masks)
+                ],
+                keys = split_names,
+                names = ['split'],
+                axis=1,
             )
 
-    y_test_pred = None
-    if return_test_predictions:
-        log.info('Getting test data predictions')
-        y_test_pred, test_score = predict_and_score(estimator_all, X_test, y_test, scoring=cfg['fit']['scoring'])
-        results_all.update({
-            # Add prefix to metrics columns (e.g. test_accuracy) but not others
-            # (e.g. score_time)
-            f'test_{k}' if k not in fit_results else k : v
-            for k,v in test_score.items()
-        })
-    fit_results.loc['all'] = pd.Series(results_all)
-    del results_all
+            if cfg['stack_split_predictions']:
+                # Ensure 1 column of results per stack
+                is_notna = y_pred.stack('prob/predict', future_stack=True).notna()
+                if check_is_partition(is_notna):
+                    y_pred = combine_predictions(y_pred)
 
-    feature_importances = None
     if ocfg['save_feature_importances']:
         feature_importances = pd.DataFrame(
             np.column_stack([est.feature_importances_ for est in fit_results['estimator']]),
             index = feature_names,
             columns = fit_results.index,
-        ).sort_values('all', ascending=False)
+        )
+        # Sort features
+        if 'all' in feature_importances:
+            feature_importances = feature_importances.sort_values('all', ascending=False)
+        else:
+            sorted_idxs = feature_importances.median(axis=1).sort_values(ascending=False).index
+            feature_importances = feature_importances.loc[sorted_idxs]
 
-    return {k:v for k,v in {
+    if not ocfg['save_estimators'] and 'estimator' in fit_results:
+        # Estimators only returned to get predictions and/or feature importances
+        fit_results = fit_results.drop(columns='estimator')
+
+    if not ocfg['save_indices']:
+        # Indices only returned to get predictions
+        is_test_data = None
+
+    if ocfg['save_indices'] and sum(ocfg.values()) == 1:
+        # Only save_indices. Uncommon use case so not putting in effort to make
+        # this efficient.
+        fit_results = y_pred = feature_importances = None
+
+    results = {k:v for k,v in {
         'fits'                : fit_results,
         'is_test_data'        : is_test_data,
-        'y_train_pred'        : y_train_pred,
-        'y_cv_test_pred'      : y_cv_test_pred,
-        'y_test_pred'         : y_test_pred,
+        'y_pred'              : y_pred,
         'feature_importances' : feature_importances,
     }.items() if v is not None}
 
+    return FitSupervisedModelResults(**results)
+
+def check_is_partition(df: DataFrame) -> bool:
+    return df.sum(axis=1).unique().tolist() == [1]
 
 def _predict(
     estimator: BaseEstimator,
@@ -301,29 +324,6 @@ def predict_and_score(
     scores = pd.Series(scores)
     return y_pred, scores
 
-def train_test_split(X, y, random_state, **kwargs):
-    """Wrapper around sklearn's train_test_split that handles user
-    requesting no train test splitting"""
-    if 'test_size' not in kwargs and 'train_size' not in kwargs:
-        log.debug('No test set being set aside for evaluation')
-        X_train, y_train = X, y
-        X_test = y_test = None
-    # TODO: Allow user to manually choose test set via column or callable
-    else:
-        X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(
-            X, y,
-            random_state=random_state,
-            # TODO: Enable use of stratify
-            **kwargs,
-        )
-        log.debug('Split data into train (%.0f%%) and test (%.0f%%) sets',
-            len(X_train)/len(X) * 100,
-            len(X_test)/len(X) * 100,
-        )
-    return X_train, X_test, y_train, y_test
-
-# TODO: Make a generic predict that accepts a single model or iterable of
-# models. Allow user to provide 'keys' and 'names' or just **kwargs for concat.
 def predict(
     estimators,
     X : DataFrame,
@@ -344,14 +344,14 @@ def predict(
         **kwargs,
     )
 
-def combine_test_results(results, is_test_data):
-    target_dtype = results[(results.columns.levels[0][0], 'predict')].dtype
-    return (results
-        [is_test_data]
+def combine_predictions(predictions):
+    target_dtype = predictions[(predictions.columns.levels[0][0], 'predict')].dtype
+    return (predictions
         .stack(['split', 'prob/predict'], future_stack=True)
         .dropna()
         .unstack('prob/predict')
         # Option 1) Keep split as index (helpful if test folds overlap)
+        # <NoOp>
         # Option 2) Keep split as column
         #.reset_index(level='split')
         # Option 3) Drop split
@@ -376,27 +376,32 @@ def add_index_level(
         axis = axis,
     )
 
-def _reformat_cross_validate_results(
+def to_cross_validate_dataframes(
     results : dict,
-    index : pd.Index,
-    columns : List[Any],
+    data_index : pd.Index,
+    split_names : List[Any],
 ) -> Tuple[DataFrame, Optional[DataFrame]]:
+    """Convert cross_validate results into pandas DataFrames"""
     is_test_data = None
     if 'indices' in results:
         n_splits = len(results['fit_time'])
         is_test_data = DataFrame(
             None,
-            index = index,
-            columns = columns,
+            index = data_index,
+            columns = split_names,
             dtype = 'bool',
-        ).rename_axis(index = index.name, columns='split')
+        ).rename_axis(index = data_index.name, columns='split')
         for i in range(n_splits):
             is_test_data.iloc[results['indices']['train'][i], i] = False
             is_test_data.iloc[results['indices']['test'][i], i] = True
 
-    results_df = DataFrame(
-        data = {k : v for k,v in results.items() if k != 'indices'},
-    ).rename_axis(index='split')
+    results_df = (
+        DataFrame(
+            data = {k : v for k,v in results.items() if k != 'indices'},
+        )
+        .rename_axis(index='split')
+        .rename(split_names.__getitem__)
+    )
     return results_df, is_test_data
 
 def read_data(
@@ -425,7 +430,8 @@ def preprocess_data(
     missing data) in order to avoid data leakage. Such transformations should be
     part of the estimator pipeline created in build_estimator'''
     if features is None:
-        features = X.columns.drop(target)
+        features = data.columns.drop(target)
+        log.info('Features not specified. Using all but the target feature: %s', features.to_list())
     X = data[features]
     y = data[target]
     return X, y
@@ -433,35 +439,34 @@ def preprocess_data(
 def build_estimator(name: str, **kwargs) -> BaseEstimator:
     return import_object(name)(**kwargs)
 
-# Standard library
-import importlib
-from typing import Type
-
-_MODULE_MAP = {
-    # Classifiers
-    'ExtraTreesClassifier' : 'sklearn.ensemble',
-    # CV Iterators
-    'KFold' : 'sklearn.model_selection',
-}
-def import_object(name: str) -> Type:
-    if name in _MODULE_MAP:
-        name = f'{_MODULE_MAP[name]}.{name}'
-    else:
-        log.debug('Importing unknown object: %s', name)
-    module_name, class_name = name.rsplit('.', maxsplit=1)
-    log.debug('Importing object: `from %s import %s`', module_name, class_name)
-    return getattr(importlib.import_module(module_name), class_name)
-
 # 3rd party
-from numpy.typing import NDArray
-from sklearn.model_selection import BaseCrossValidator, BaseShuffleSplit
+def build_train_test_iterator(
+    name: str,
+    train_on_all: bool = False,
+    random_state: Optional[np.random.RandomState] = None,
+    **kwargs
+) -> TrainTestIterable:
+    tt_iter = None
+    if name == 'train_test_split':
+        tt_iter = import_object('skutils.train_test_iterators.TrainTestSplit')(**kwargs)
+    else:
+        try:
+            if kwargs.get('shuffle') is True:
+                # sklearn iterators raise a ValueError if random_state specified
+                # but shuffle != True
+                kwargs = {**kwargs, 'random_state' : random_state}
+            tt_iter = import_object(name)(**kwargs)
+        except ImportError:
+            pass
+    if tt_iter is None:
+        raise NotImplementedError(f'name = {name}')
 
-NDArrayInt = NDArray[np.int64]
-def build_cv_iterator(
-    name : str,
-    **kwargs,
-) -> Union[BaseCrossValidator, Iterable[Tuple[NDArrayInt, NDArrayInt]], BaseShuffleSplit, None]:
-    return import_object(name)(**kwargs)
+    if train_on_all:
+        tt_iter = TrainOnAllWrapper(tt_iter)
+
+    return tt_iter
+
+
 
 # 3rd party
 from sklearn.model_selection import GridSearchCV

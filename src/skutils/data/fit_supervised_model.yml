@@ -4,36 +4,55 @@ inputs:
   target  : null
   index   : null
   positive_class : null
+
 outputs:
   save_test_scores         : true # Would this ever be false?
   save_train_scores        : false
-  save_estimator           : false
+  save_estimators          : false
   save_test_predictions    : false
   save_train_predictions   : false
-  # TODO: Default to saving based off save_test_scores but allow user to
-  # override in case they want to turn off cv outputs.
-  save_cv_test_scores      : true # Would this ever be false?
-  save_cv_train_scores     : false
-  save_cv_estimators       : false
-  save_cv_test_predictions : false
-  save_cv_train_predictions: false
-  save_cv_indices          : false
+  save_indices             : false
   save_feature_importances : false
+
 random_seed: 0
+
 preprocess: {}
-train_test_split:
-  shuffle: false
-  test_size: 0.2
+
+model_selector: null
+
+train_test_iterator:
+  # Option 1)
+  name: train_test_split
+  # Option 2) sklearn CrossValidator on all data
+  # name: KFold
+  # n_splits: 5
+  # Option 3) KFold on train set + evaluation 
+  # TODO: Option X) GridSearchCV on train set + evaluation of best model on test set
+
+train_on_all : false
+
+# Names for splits used in DataFrame columns. 'null' results in simple
+# enumeration.
+split_names: null
+
+# Collapse predictions for each split into a single column (a.k.a.
+# pd.DataFrame.stack) if possible. The common use case would be stacking
+# predictions on test folds during cross validation into a single column of
+# predictions given that the test folds form a partition of the data. If test
+# sets overlap across splits or training predictions are saved out alongside
+# test predictions, then stacking is not possible as there are multiple
+# predictions per row. In that case, this option is ignored.
+stack_split_predictions: true
+
+
+# TODO: Allow user to specify multiple estimators as a list or even "all Classifiers"
 estimator:
   name: ExtraTreesClassifier
   # n_estimators: 10
-cv_iterator:
-  name: KFold
-  # n_splits: 5
-model_selector: null
+
 fit:
   # return_* keywords determined by save_* parameters in outputs section so no
   # need to manually set them here
   scoring:
   - accuracy
-  - neg_log_loss
+  # - neg_log_loss

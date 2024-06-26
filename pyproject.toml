@@ -27,7 +27,6 @@ disable = [
     "missing-class-docstring",
     "missing-function-docstring",
     "fixme",
-
 ]
 [tool.pylint.design]
 max-args = 10
