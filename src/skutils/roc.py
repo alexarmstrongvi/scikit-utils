@@ -1,6 +1,6 @@
 """Utilities for working with and plotting ROC Curves"""
 # Standard library
-from typing import NamedTuple, Literal, Iterable
+from typing import NamedTuple, Literal 
 from collections.abc import Collection, Sequence
 from functools import cached_property, partial
 import logging
@@ -500,7 +500,7 @@ def bootstrap(
         for _ in range(n_resamples)
     ]
 
-def _require_dataframe(df = None, **columns) -> tuple[pd.DataFrame, tuple[str, ...]]:
+def _require_dataframe(df = None, **columns) -> tuple[pd.DataFrame, list]:
     """Force output to be a dataframe and column names whether user provides
     that initially or provides arrays for the columns instead"""
     columns = {k:v for k,v in columns.items() if v is not None}

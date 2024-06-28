@@ -1,12 +1,24 @@
-
 # Standard library
 from collections.abc import Iterable
+import itertools
 
 # 3rd party
-from sklearn.model_selection import train_test_split
+import numpy as np
+from numpy.typing import NDArray
+from sklearn.model_selection import (
+    BaseCrossValidator,
+    BaseShuffleSplit,
+    train_test_split
+)
 
-# Local
-from ._types import NDArrayInt
+# Type aliases
+NDArrayInt = NDArray[np.int64]
+
+TrainTestIterable = (
+    BaseCrossValidator
+    | Iterable[tuple[NDArrayInt, NDArrayInt]]
+    | BaseShuffleSplit
+)
 
 ################################################################################
 class TrainTestSplit: # TODO: (BaseCrossValidator):
@@ -37,3 +49,18 @@ class TrainTestSplit: # TODO: (BaseCrossValidator):
             (train.index, test.index)
             for train, test in ((y_train, y_test),)
         )
+
+class TrainOnAllWrapper:
+    def __init__(self, cv: TrainTestIterable):
+        self.cv = cv
+
+    def get_n_splits(self, *args, **kwargs) -> int:
+        return self.cv.get_n_splits(*args, **kwargs) + 1
+
+    def split(self, X, y=None, groups=None) -> Iterable[tuple[NDArrayInt, NDArrayInt]]:
+        iterable: Iterable[tuple[NDArrayInt, NDArrayInt]]
+        if hasattr(self.cv, 'split'):
+            iterable = self.cv.split(X, y, groups)
+        elif hasattr(self.cv, '__iter__'):
+            iterable = self.cv
+        yield from itertools.chain(iterable, [(X.index, X.index)])

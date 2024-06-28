@@ -1,12 +1,9 @@
-inputs:
-  path    : null
-  features: null
-  target  : null
-  index   : null
-  positive_class : null
+# Path to training data in a format accepted by pandas (e.g. read_csv, read_hdf)
+input:
+  path : null
 
 outputs:
-  save_test_scores         : true # Would this ever be false?
+  save_test_scores         : true
   save_train_scores        : false
   save_estimators          : false
   save_test_predictions    : false
@@ -16,7 +13,11 @@ outputs:
 
 random_seed: 0
 
-preprocess: {}
+preprocess:
+  features: null
+  target  : target
+  index   : null
+  # TODO: positive_class : null
 
 model_selector: null
 
@@ -26,7 +27,7 @@ train_test_iterator:
   # Option 2) sklearn CrossValidator on all data
   # name: KFold
   # n_splits: 5
-  # Option 3) KFold on train set + evaluation 
+  # Option 3) KFold on train set + evaluation
   # TODO: Option X) GridSearchCV on train set + evaluation of best model on test set
 
 train_on_all : false

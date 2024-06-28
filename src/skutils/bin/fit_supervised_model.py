@@ -4,21 +4,16 @@ Configurable script for fitting supervised models
 """
 # Standard library
 import argparse
+from collections.abc import Collection, Iterable
 import logging
 from pathlib import Path
 import time
 from typing import (
     # TODO: Update to 3.9 type hints
     Any,
-    Collection,
-    Iterable,
-    List,
     Literal,
     NotRequired,
-    Optional,
-    Tuple,
     TypedDict,
-    Union
 )
 
 # 3rd party
@@ -88,20 +83,17 @@ def main():
     # save_visualizations(results)
 
 class FitSupervisedModelResults(TypedDict):
-    fits                : DataFrame
+    fits                : NotRequired[DataFrame]
     is_test_data        : NotRequired[DataFrame]
     y_pred              : NotRequired[DataFrame]
     feature_importances : NotRequired[Series]
 
 def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResults:
-    icfg = cfg['inputs']
     ocfg = cfg['outputs']
 
     # reformat_cfg()
     ########################################
     # Checks
-    if icfg['target'] is None:
-        raise ValueError('Must specify target feature')
     if not any(ocfg.values()):
         log.info('All outputs disabled')
 
@@ -120,17 +112,8 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
 
     ########################################
     log.info('Reading in data')
-    # data = read_data(**icfg)
-    if icfg['index'] is not None:
-        data = data.set_index(icfg['index'])
-    else:
-        data = data.rename_axis(index='index')
-    X, y = preprocess_data(
-        data,
-        features = icfg['features'],
-        target   = icfg['target'],
-        **cfg['preprocess']
-    )
+    # data = read_data(icfg['input'])
+    X, y = preprocess_data(data, **cfg['preprocess'])
     feature_names = X.columns.tolist()
 
     ########################################
@@ -287,7 +270,7 @@ def _predict(
 # 3rd party
 from sklearn.metrics._scorer import _Scorer
 
-ScoringType = Union[str, Iterable[str]]
+ScoringType = str | Iterable[str]
 def apply_scorers(
     y_true: Series,
     y_pred: Series,
@@ -315,8 +298,8 @@ def predict_and_score(
     estimator: BaseEstimator,
     X: DataFrame,
     y: Series,
-    scoring: Union[str, Iterable[str], Iterable[_Scorer]],
-) -> Tuple[DataFrame, Series]:
+    scoring: str | Iterable[str] | Iterable[_Scorer],
+) -> tuple[DataFrame, Series]:
     start = time.perf_counter()
     y_pred = predict(estimator, X)
     scores = apply_scorers(y, y_pred, scoring)
@@ -379,8 +362,8 @@ def add_index_level(
 def to_cross_validate_dataframes(
     results : dict,
     data_index : pd.Index,
-    split_names : List[Any],
-) -> Tuple[DataFrame, Optional[DataFrame]]:
+    split_names : list[Any],
+) -> tuple[DataFrame, DataFrame | None]:
     """Convert cross_validate results into pandas DataFrames"""
     is_test_data = None
     if 'indices' in results:
@@ -422,16 +405,26 @@ def preprocess_data(
     data: pd.DataFrame,
     *,
     target: str,
-    features: Optional[Collection[str]] = None,
-) -> Tuple[DataFrame, Series]:
+    features: Collection[str] | None = None,
+    index: Any = None,
+) -> tuple[DataFrame, Series]:
     '''Preprocess the raw data for model fitting
 
     This SHOULD NOT INVOLVE data-dependent transformations (e.g. interpolate
     missing data) in order to avoid data leakage. Such transformations should be
-    part of the estimator pipeline created in build_estimator'''
+    part of the estimator pipeline created in build_estimator
+    '''
+
+    if index is not None:
+        data = data.set_index(index)
+    else:
+        data = data.rename_axis(index='index')
+
     if features is None:
         features = data.columns.drop(target)
         log.info('Features not specified. Using all but the target feature: %s', features.to_list())
+
+    # TODO: Save any columns not in features or target to metadata and return?
     X = data[features]
     y = data[target]
     return X, y
@@ -443,7 +436,7 @@ def build_estimator(name: str, **kwargs) -> BaseEstimator:
 def build_train_test_iterator(
     name: str,
     train_on_all: bool = False,
-    random_state: Optional[np.random.RandomState] = None,
+    random_state: np.random.RandomState | None = None,
     **kwargs
 ) -> TrainTestIterable:
     tt_iter = None

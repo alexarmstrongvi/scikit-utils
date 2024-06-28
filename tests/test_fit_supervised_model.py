@@ -2,7 +2,6 @@
 # Standard library
 import copy
 import logging
-from typing import List, Any
 
 # 3rd party
 import numpy as np
@@ -33,12 +32,6 @@ def test_fit_supervised_model():
         columns = [f'Feature {i}' for i in range(X.shape[1])],
     ).assign(target=y)
     cfg = get_default_cfg_supervised()
-
-    # Test required arguments missing
-    with pytest.raises(ValueError):
-        results = fit_supervised_model(data, cfg)
-
-    cfg['inputs']['target'] = 'target'
 
     ########################################
     # Test default train-test evaluation
