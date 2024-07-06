@@ -1,0 +1,14 @@
+# NOTE: flake8 does not yet support pyproject.toml configuration.
+# https://github.com/PyCQA/flake8/issues/234
+[flake8]
+max-line-length = 100
+extend-exclude = .venv, build
+extend-ignore =
+    # E251 unexpected spaces around keyword / parameter equals
+    E251,
+    # E202 whitespace before '}'
+    E202,
+    # E203 whitespace before ':'
+    E203,
+    # E221 multiple spaces before operator
+    E221,

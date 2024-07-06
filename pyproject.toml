@@ -2,6 +2,36 @@
 name = 'scikit-utils'
 description = 'Utilities for scikit-learn'
 dynamic = ["version"]
+requires-python = ">=3.10"
+dependencies = [
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "seaborn",
+    "shapely",  # Used in roc.py
+    "pyyaml"
+]
+
+[project.optional-dependencies]
+dev = [
+    # Testing
+    "pytest",
+    "tox",
+    # REPL
+    "ipykernel",
+    # Debugging
+    "ipdb",
+    # Code quality
+    "flake8",     # Linter
+    "pylint",     # Linter
+    "isort",      # Import order checker
+    "radon",      # Complexity checker
+    "coverage",   # Coverage checker
+    "pytest-cov", # Coverage checker plugin for pytest
+    # Centralized Version Control
+    "pre-commit",
+]
 
 ################################################################################
 [tool.setuptools.dynamic]
@@ -21,7 +51,7 @@ multi_line_output = 3 # Vertical Hanging Indent
 [tool.pylint.main]
 recursive = true
 [tool.pylint."MESSAGES CONTROL"]
-ignore = [".venv", ".tox", "docs"]
+ignore = [".venv", ".tox", "docs", "build"]
 disable = [
     "missing-module-docstring",
     "missing-class-docstring",

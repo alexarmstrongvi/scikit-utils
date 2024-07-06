@@ -39,10 +39,10 @@ split_names: null
 # Collapse predictions for each split into a single column (a.k.a.
 # pd.DataFrame.stack) if possible. The common use case would be stacking
 # predictions on test folds during cross validation into a single column of
-# predictions given that the test folds form a partition of the data. If test
-# sets overlap across splits or training predictions are saved out alongside
-# test predictions, then stacking is not possible as there are multiple
-# predictions per row. In that case, this option is ignored.
+# predictions given that the test folds partition the data. If test sets overlap
+# across splits or training predictions are saved out alongside test
+# predictions, then stacking is not possible as there are multiple predictions
+# per row. In that case, this option is ignored.
 stack_split_predictions: true
 
 

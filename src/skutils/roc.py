@@ -1,23 +1,23 @@
 """Utilities for working with and plotting ROC Curves"""
 # Standard library
-from typing import NamedTuple, Literal 
 from collections.abc import Collection, Sequence
 from functools import cached_property, partial
 import logging
+from typing import Literal, NamedTuple
 
 # 3rd party
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
+from matplotlib.patches import Polygon
+import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
 import scipy.stats
-import sklearn.metrics
-from shapely import LineString
-import matplotlib.pyplot as plt
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
-from matplotlib.patches import Polygon
 import seaborn as sns
 from seaborn import FacetGrid
+from shapely import LineString
+import sklearn.metrics
 
 # Globals
 log = logging.getLogger(__name__)
@@ -210,10 +210,10 @@ def plot_roc_curve(
     return ax
 
 def plot_rate_curve(
-    thresholds, 
-    rate, 
-    label, 
-    ci_width = 0, 
+    thresholds,
+    rate,
+    label,
+    ci_width = 0,
     n_samples = 0,
     ax = None
 ) -> Axes:
@@ -573,7 +573,7 @@ def compute_roc_ci_bands(
     # - "ROC Confidence Bands: An Empirical Evaluation" by S. Mackassy, 2005
     # - "On Bootstrapping the ROC Curve" by P. Bertail, 2008
     #   - "On constructing accurate confidence bands for ROC curves through smooth resampling" by P. Bertail, Oct 2008
-    
+
     if method == 'tpr_averaging':
         # 1a) Vertical averaging (VA)
         return _compute_roc_ci_band_rate_avg(roc_curves, ci_width, sweep_axis='fpr', **kwargs)

@@ -8,13 +8,7 @@ from collections.abc import Collection, Iterable
 import logging
 from pathlib import Path
 import time
-from typing import (
-    # TODO: Update to 3.9 type hints
-    Any,
-    Literal,
-    NotRequired,
-    TypedDict,
-)
+from typing import Any, Literal, TypedDict
 
 # 3rd party
 import numpy as np
@@ -45,10 +39,6 @@ def _get_test_inputs():
     import sklearn.datasets
     data_bunch = sklearn.datasets.load_breast_cancer(as_frame=True)
     data = data_bunch['frame']
-    cfg['inputs'].update({
-        'features' : data_bunch['feature_names'].tolist(),
-        'target'   : 'target',
-    })
     # Test 1: Binary target
     # Test 2: Target labels
     data['target'] = (data['target']
@@ -76,17 +66,18 @@ def main():
     )
     logging.getLogger('asyncio').setLevel('WARNING')
     cfg, data = _get_test_inputs()
+    # data = read_data(**cfg.pop('input'))
     results = fit_supervised_model(data, cfg)
 
     # log.info('Saving results')
     # save_results(results)
     # save_visualizations(results)
 
-class FitSupervisedModelResults(TypedDict):
-    fits                : NotRequired[DataFrame]
-    is_test_data        : NotRequired[DataFrame]
-    y_pred              : NotRequired[DataFrame]
-    feature_importances : NotRequired[Series]
+class FitSupervisedModelResults(TypedDict, total=False):
+    fits                : DataFrame
+    is_test_data        : DataFrame
+    y_pred              : DataFrame
+    feature_importances : Series
 
 def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResults:
     ocfg = cfg['outputs']
@@ -111,8 +102,7 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
     estimator = build_estimator(**cfg['estimator'])
 
     ########################################
-    log.info('Reading in data')
-    # data = read_data(icfg['input'])
+    log.info('Preprocessing data')
     X, y = preprocess_data(data, **cfg['preprocess'])
     feature_names = X.columns.tolist()
 
