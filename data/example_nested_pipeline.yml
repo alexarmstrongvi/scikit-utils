@@ -1,0 +1,62 @@
+# Multiple options for defining an estimator
+
+# Option 1: Just the name. Defaults will be used
+# estimator: ExtraTreesClassifier
+
+# Option 2: Name with kwargs
+# estimator:
+#     ExtraTreesClassifier:
+#         max_depth : 10
+
+# Option 3: Simple pipeline
+# estimator:
+#     make_pipeline:
+#         steps: [PCA, LinearRegression]
+
+# Option 4: Nested pipeline
+# Run the following to test the below configuration
+# >> python skutils/bin/demo_nested_pipeline.py
+# Configuration based on scikit-learn docs: "Column Transformer with Mixed Types"
+estimator:
+    make_pipeline:
+        steps: [
+            # Step 1: Feature engineering
+            [preprocessor, ColumnTransformer, {
+                transformers: [
+                    # Transformer 1
+                    [encoder, OneHotEncoder, {handle_unknown: ignore}, [sex]],
+                    # Transformer 2
+                    [
+                        'num',
+                        make_pipeline,
+                        {
+                            steps: [
+                                [SimpleImputer, {strategy : median}],
+                                StandardScaler,
+                            ],
+                            verbose: true,
+                        },
+                        {'dtype_include' : 'number'},
+                    ],
+                    # Transformer 3
+                    [
+                        'cat',
+                        Pipeline,
+                        {
+                            steps: [
+                                [encoder, OneHotEncoder, {handle_unknown: ignore}],
+                                [selector, SelectPercentile, {percentile: 50}],
+                            ],
+                            verbose: True,
+                        },
+                        [embarked, pclass],
+                    ],
+                ],
+                remainder: drop,
+                sparse_threshold: 0,
+                verbose: True,
+            }],
+            # Step 2: Prediction
+            [classifier, LogisticRegression],
+        ]
+        verbose: True

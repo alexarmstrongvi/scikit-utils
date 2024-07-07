@@ -157,8 +157,6 @@ def test_fit_supervised_model():
 
     # Test X: Multiclass & multilabel classifier
 
-    # pytest.set_trace()
-
 def _test_fits(fits: pd.DataFrame) -> None:
     assert fits.notna().all().all()
     assert pd.api.types.is_float_dtype(fits['fit_time'])

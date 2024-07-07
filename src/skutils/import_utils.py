@@ -11,22 +11,25 @@ log = logging.getLogger(__name__)
 def import_object(name: str) -> Type:
     if name in _MODULE_MAP:
         name = f'{_MODULE_MAP[name]}.{name}'
-    # else:
-    #     log.debug('Unregistered import name: %s', name)
+    elif '.' not in name:
+        raise ValueError(
+            f'Unrecognized import name {name!r}.'
+            ' Check for typo or try full module path.'
+        )
     module_name, class_name = name.rsplit('.', maxsplit=1)
     if module_name not in sys.modules:
         log.debug('Importing new module: `import %s`', module_name)
-    log.debug('Importing object: `from %s import %s`', module_name, class_name)
+    log.debug('Getting module object: `return %s.%s`', module_name, class_name)
     return getattr(importlib.import_module(module_name), class_name)
 
-# Map from common objects to their modules so configuration files can specifiy
+# Maps from common objects to their modules so configuration files can specifiy
 # estimator without full import path. Also, this serves as a nice reference for
-# the available estimators.
-# NOTE: Entries organized roughly in the order they are introduced in the
-# scikit-learn user guide.
+# the available sklearn objects.
+# NOTE: Entries organized first into helpful groupings (e.g. _ESTIMATORS).
+# Within those groups, they are roughly in the order they are introduced in the
+# scikit-learn user guide
 _ESTIMATORS = {
     'classifiers' : {
-        # Unsorted
         'base' : {
             # Section 1.1
             'RidgeClassifier'               : 'sklearn.linear_model',
@@ -69,10 +72,6 @@ _ESTIMATORS = {
             # Section 3.4
             'DummyClassifier'               : 'sklearn.dummy',
         },
-        'cv' : { # Builtin support for CV model selection as opposed to using GridSearchCV
-            'LogisticRegressionCV'  : 'sklearn.linear_model',
-            'RidgeClassifierCV'     : 'sklearn.linear_model',
-        },
         'meta' : { # Contruct new classifier from base classifier(s)
             # Section 1.11
             'StackingClassifier'        : 'sklearn.ensemble',
@@ -89,6 +88,10 @@ _ESTIMATORS = {
             'SelfTrainingClassifier'    : 'sklearn.semi_supervised',
             # Section 1.16
             'CalibratedClassifierCV'    : 'sklearn.calibration',
+        },
+        'cv' : { # Builtin support for CV model selection as opposed to using GridSearchCV
+            'LogisticRegressionCV'  : 'sklearn.linear_model',
+            'RidgeClassifierCV'     : 'sklearn.linear_model',
         },
     },
     'regressors' : {
@@ -120,7 +123,6 @@ _ESTIMATORS = {
             'SVR'                          : 'sklearn.svm',
             'NuSVR'                        : 'sklearn.svm',
             'LinearSVR'                    : 'sklearn.svm',
-            # Section 1.5
             # Section 1.6
             'KNeighborsRegressor'          : 'sklearn.neighbors',
             'RadiusNeighborsRegressor'     : 'sklearn.neighbors',

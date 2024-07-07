@@ -28,6 +28,11 @@ train_test_iterator:
   # name: KFold
   # n_splits: 5
   # Option 3) KFold on train set + evaluation
+  # Option 4) Custom
+  # name: skutils.train_test_iterators.AblationSplit
+  # kfold_cv:
+  #   name:
+
   # TODO: Option X) GridSearchCV on train set + evaluation of best model on test set
 
 train_on_all : false
@@ -47,9 +52,7 @@ stack_split_predictions: true
 
 
 # TODO: Allow user to specify multiple estimators as a list or even "all Classifiers"
-estimator:
-  name: ExtraTreesClassifier
-  # n_estimators: 10
+estimator: ExtraTreesClassifier
 
 fit:
   # return_* keywords determined by save_* parameters in outputs section so no

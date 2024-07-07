@@ -14,17 +14,21 @@ from typing import Any, Literal, TypedDict
 import numpy as np
 import pandas as pd
 from pandas import DataFrame, Series
+import sklearn
 from sklearn.base import BaseEstimator
 from sklearn.metrics import get_scorer
-from sklearn.model_selection import cross_validate
+from sklearn.metrics._scorer import _Scorer
+from sklearn.model_selection import GridSearchCV, cross_validate
 
 # 1st party
 from skutils.data import get_default_cfg_supervised
 from skutils.import_utils import import_object
+from skutils.pipeline import make_pipeline
 from skutils.train_test_iterators import TrainOnAllWrapper, TrainTestIterable
 
 # Globals
 log = logging.getLogger(Path(__file__).stem)
+sklearn.set_config(transform_output='pandas')
 
 # TODO: Update to work on multi-class problems
 # TODO: Update to work on multi-label problems
@@ -99,7 +103,7 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
         train_on_all = cfg['train_on_all'],
         random_state=random_state,
     )
-    estimator = build_estimator(**cfg['estimator'])
+    estimator = build_estimator(cfg['estimator'])
 
     ########################################
     log.info('Preprocessing data')
@@ -258,7 +262,6 @@ def _predict(
     return pred
 
 # 3rd party
-from sklearn.metrics._scorer import _Scorer
 
 ScoringType = str | Iterable[str]
 def apply_scorers(
@@ -414,15 +417,29 @@ def preprocess_data(
         features = data.columns.drop(target)
         log.info('Features not specified. Using all but the target feature: %s', features.to_list())
 
+    # NOTE: User can put any quickfixes here but in general scikit-learn expects
+    # user to have done all general preprocessing prior to running pipeline. The
+    # preprocessing that is part of the pipeline is reserved for steps that risk
+    # data leakage and should be run separately in the case of cross validation.
+
     # TODO: Save any columns not in features or target to metadata and return?
     X = data[features]
     y = data[target]
+
     return X, y
 
-def build_estimator(name: str, **kwargs) -> BaseEstimator:
-    return import_object(name)(**kwargs)
+def build_estimator(cfg: str | dict) -> BaseEstimator:
+    match cfg:
+        case str():
+            class_ = cfg
+            estimator = import_object(class_)()
+        case {'make_pipeline' : kwargs} | {'Pipeline' : kwargs}:
+            estimator = make_pipeline(**kwargs)
+        case dict() if len(cfg) == 1:
+            class_, kwargs = tuple(cfg.items())[0]
+            estimator = import_object(class_)(**kwargs)
+    return estimator
 
-# 3rd party
 def build_train_test_iterator(
     name: str,
     train_on_all: bool = False,
@@ -449,10 +466,6 @@ def build_train_test_iterator(
 
     return tt_iter
 
-
-
-# 3rd party
-from sklearn.model_selection import GridSearchCV
 
 
 def build_model_selector(estimator: BaseEstimator, param_grid: dict = None, **kwargs) -> BaseEstimator:
