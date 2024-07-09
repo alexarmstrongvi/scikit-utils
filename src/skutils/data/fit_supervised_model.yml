@@ -1,8 +1,17 @@
 # Path to training data in a format accepted by pandas (e.g. read_csv, read_hdf)
 input:
   path : null
+  # TODO: data, model, predictions, is_test_data
 
 outputs:
+  # Output directory for saving outputs
+  path : null
+  # Overwrite output directory if it exists. Otherwise, ask user for input.
+  overwrite : False
+  # Create timestamp sub-directory in `path` for saving outputs instead of
+  # saving directly to `path`.
+  create_subdir : False
+  # Output toggles
   save_test_scores         : true
   save_train_scores        : false
   save_estimators          : false
@@ -10,14 +19,22 @@ outputs:
   save_train_predictions   : false
   save_indices             : false
   save_feature_importances : false
+  # TODO: visualization outputs
+  # save_confusion_matrix_plot : True
+  # save_roc_plot : True
+  # save_prob_plot: False
+  # save_feature_plots: False
+
+logging: null
 
 random_seed: 0
 
 preprocess:
-  features: null
-  target  : target
-  index   : null
-  # TODO: positive_class : null
+  features   : null
+  target     : target
+  index      : null # passed to DataFrame.set_index(index)
+  target_map : null # passed to DataFrame[target].map(target_map)
+  astype     : null # passed to DataFrame.astype(astype)
 
 model_selector: null
 
@@ -60,3 +77,17 @@ fit:
   scoring:
   - accuracy
   # - neg_log_loss
+
+visualization:
+  image_ext: .png
+  roc:
+    # TODO: simplify roc curve plotting functions
+    facet_grid: null # kwargs for seaborn.facetgrid
+    facet_grid_roc: null # kwargs for _facetgrid_plot_roc_curve
+    bootstrap: null # kwargs for roc.bootstrap
+    curve: null # kwargs for plot_roc_curve
+    scaling:
+      tp_count : null
+      fp_count : null
+  # TODO: Add other sklearn supported visualizations: confusion matrix, learning
+  # curve, etc.

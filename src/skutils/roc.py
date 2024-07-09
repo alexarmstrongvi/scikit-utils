@@ -132,6 +132,7 @@ def plot_roc_curve(
     tpr             : str | NDArrayFloat = 'tpr',
     thresholds      : str | NDArrayFloat = 'thresholds',
     # Optional
+    # TODO: allow specifying threshold, fpr, and tpr values
     plot_thresholds : str | Sequence | None = None,
     n_thresholds    : int = 5,
     plot_diagonal   : bool = False,

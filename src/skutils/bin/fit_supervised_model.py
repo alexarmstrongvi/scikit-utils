@@ -395,11 +395,13 @@ def read_data(
     return data
 
 def preprocess_data(
-    data: pd.DataFrame,
+    data       : pd.DataFrame,
     *,
-    target: str,
-    features: Collection[str] | None = None,
-    index: Any = None,
+    target     : str,
+    features   : Collection[str] | None = None,
+    target_map : dict | None = None,
+    astype     : dict | None = None,
+    index      : Any = None,
 ) -> tuple[DataFrame, Series]:
     '''Preprocess the raw data for model fitting
 
@@ -407,6 +409,13 @@ def preprocess_data(
     missing data) in order to avoid data leakage. Such transformations should be
     part of the estimator pipeline created in build_estimator
     '''
+
+
+    if target_map is not None:
+        data[target] = data[target].map(target_map)
+
+    if astype is not None:
+        data = data.astype(astype)
 
     if index is not None:
         data = data.set_index(index)
