@@ -4,11 +4,15 @@ Configurable script for fitting supervised models
 """
 # Standard library
 import argparse
-from collections.abc import Collection, Iterable
+from collections.abc import Collection
+from copy import deepcopy
+from datetime import datetime
 import logging
 from pathlib import Path
-import time
-from typing import Any, Literal, TypedDict
+import pickle
+import pprint
+import shutil
+from typing import Any, TypedDict
 
 # 3rd party
 import numpy as np
@@ -16,66 +20,81 @@ import pandas as pd
 from pandas import DataFrame, Series
 import sklearn
 from sklearn.base import BaseEstimator
-from sklearn.metrics import get_scorer
-from sklearn.metrics._scorer import _Scorer
 from sklearn.model_selection import GridSearchCV, cross_validate
+import yaml
 
 # 1st party
+from skutils import git, logging_utils, scripting
 from skutils.data import get_default_cfg_supervised
 from skutils.import_utils import import_object
 from skutils.pipeline import make_pipeline
+from skutils.prediction import combine_predictions, predict
 from skutils.train_test_iterators import TrainOnAllWrapper, TrainTestIterable
 
 # Globals
 log = logging.getLogger(Path(__file__).stem)
+
+# Configuration
+logging.getLogger('asyncio').setLevel('WARNING')
 sklearn.set_config(transform_output='pandas')
 
 # TODO: Update to work on multi-class problems
 # TODO: Update to work on multi-label problems
 # TODO: Update to work on multi-class & multi-label problems
-# TODO: Update to work on regression problems
 # TODO: Update to enable hyperparameter searching
+# TODO: Update to enable feature selection
 ################################################################################
-def _get_test_inputs():
-    cfg = get_default_cfg_supervised()
-
-    # 3rd party
-    import sklearn.datasets
-    data_bunch = sklearn.datasets.load_breast_cancer(as_frame=True)
-    data = data_bunch['frame']
-    # Test 1: Binary target
-    # Test 2: Target labels
-    data['target'] = (data['target']
-        .map({0:'NoCancer',1:'HasCancer'})
-        .astype(pd.CategoricalDtype(['NoCancer','HasCancer']))
-    )
-
-    return cfg, data
-
 def main():
-    # args = parse_argv()
-    # cfg  = get_config(args.configs)
+    args = parse_argv()
+    cfg  = get_config(args)
 
-    # icfg = cfg['inputs']
-    # ocfg = cfg['outputs']
-    # odir = Path(ocfg['path'])
+    ocfg = cfg['outputs']
+    odir = Path(ocfg['path'])
 
-    # scripting.require_empty_dir(ocfg['path'])
-    # configure_logging(**ocfg['logging'])
+    # Setup
+    if ocfg["timestamp_subdir"]:
+        odir.mkdir(exist_ok=True)
+        odir = odir / datetime.now().strftime("%Y%m%d_%H%M%S")
+    scripting.require_empty_dir(odir, overwrite=ocfg['overwrite'])
+    logging_utils.update_log_filenames(odir, cfg['logging'])
+    logging_utils.configure_logging(**cfg['logging'])
+    logging_utils.require_root_console_handler(args.log_cli_level)
+    log.debug("Logging Summary:\n%s", logging_utils.summarize_logging())
 
-    logging.basicConfig(
-        level = 'DEBUG',
-        format = '%(levelname)8s | %(module)s :: %(message)s',
-        force = True,
-    )
-    logging.getLogger('asyncio').setLevel('WARNING')
-    cfg, data = _get_test_inputs()
-    # data = read_data(**cfg.pop('input'))
+    # Reproducibility
+    log.debug("Final configuration:\n%s", pprint.pformat(cfg, indent=4))
+    if ocfg['save_input_configs']:
+        buf = len(args.configs)
+        for i, path in enumerate(args.configs):
+            opath = odir / f'config_input{i:0{buf}d}_{Path(path).stem}.yml'
+            shutil.copyfile(path, opath)
+            log.info("Input configuration saved: %s", opath)
+    if ocfg['save_final_config']:
+        opath = odir / "config.yml"
+        yaml.safe_dump(cfg, opath.open("w"))
+        log.info("Final configuration saved: %s", opath)
+
+    if (working_dir := git.find_working_dir(Path(__file__))) is not None:
+        log.debug("Version Control Summary:\n%s", git.summarize_version_control(working_dir))
+        if ocfg['save_git_diff']:
+            opath = odir / "git_diff.patch"
+            opath.write_text(git.get_diff(working_dir))
+            log.info("Git diff patch saved: %s", opath)
+
+    ########################################
+    # Run
+    ########################################
+    icfg = cfg.pop('input')
+    ipath = Path(icfg.pop('path'))
+    data = read_data(ipath, **icfg)
     results = fit_supervised_model(data, cfg)
 
+    if (fits := results.get('fits')) is not None:
+        log.info('Fit results:\n%s', fits.drop(columns='estimators', errors='ignore'))
+
     # log.info('Saving results')
-    # save_results(results)
-    # save_visualizations(results)
+    save_results(odir, results)
+    # save_visualizations(results, cfg['visualizations'])
 
 class FitSupervisedModelResults(TypedDict, total=False):
     fits                : DataFrame
@@ -84,6 +103,7 @@ class FitSupervisedModelResults(TypedDict, total=False):
     feature_importances : Series
 
 def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResults:
+    # TODO: Split up cfg into kwargs once there is a stable format
     ocfg = cfg['outputs']
 
     # reformat_cfg()
@@ -177,13 +197,13 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
                     for est, mask in zip(fit_results['estimator'], masks)
                 ],
                 keys = split_names,
-                names = ['split'],
+                names = ['split', 'pred'],
                 axis=1,
             )
 
             if cfg['stack_split_predictions']:
                 # Ensure 1 column of results per stack
-                is_notna = y_pred.stack('prob/predict', future_stack=True).notna()
+                is_notna = y_pred.stack('pred', future_stack=True).notna()
                 if check_is_partition(is_notna):
                     y_pred = combine_predictions(y_pred)
 
@@ -208,7 +228,7 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
         # Indices only returned to get predictions
         is_test_data = None
 
-    if ocfg['save_indices'] and sum(ocfg.values()) == 1:
+    if ocfg['save_indices'] and sum(v for k,v in ocfg.items() if k.startswith('save_')) == 1:
         # Only save_indices. Uncommon use case so not putting in effort to make
         # this efficient.
         fit_results = y_pred = feature_importances = None
@@ -222,172 +242,14 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
 
     return FitSupervisedModelResults(**results)
 
-def check_is_partition(df: DataFrame) -> bool:
-    return df.sum(axis=1).unique().tolist() == [1]
-
-def _predict(
-    estimator: BaseEstimator,
-    X        : DataFrame,
-    proba    : bool = True,
-    simplify : bool = False,
-) -> DataFrame:
-    """Wrapper around estimator predict/predict_proba that preserves pandas data types"""
-    # TODO: Generalize to work with regression
-    target_dtype = estimator.classes_.dtype
-    if pd.api.types.is_string_dtype(target_dtype):
-        target_dtype = pd.CategoricalDtype(estimator.classes_)
-    if proba and hasattr(estimator, 'predict_proba'):
-        pred = (
-            pd.DataFrame(
-                estimator.predict_proba(X),
-                index   = X.index,
-                columns = estimator.classes_,
-                # Would this be better?
-                # columns = [f'prob_{c}' for c in estimator.classes_],
-            )
-            .rename_axis(columns='prob/predict')
-        )
-        if not simplify:
-            pred['predict'] = pred.idxmax(axis=1).astype(target_dtype)
-        elif estimator.n_classes_ == 2:
-            # TODO: Allow user to configure which class corresponds to prob=1
-            pred = pred[[estimator.classes_[0]]]
-    else:
-        pred = pd.DataFrame(
-            estimator.predict(X),
-            index   = X.index,
-            columns = ['predict'],
-            dtype   = target_dtype,
-        )
-    return pred
-
-# 3rd party
-
-ScoringType = str | Iterable[str]
-def apply_scorers(
-    y_true: Series,
-    y_pred: Series,
-    scoring: ScoringType,
-):
-    scores = {}
-    if isinstance(scoring, str):
-        scoring = [scoring]
-    scorers = {s : get_scorer(s) if isinstance(s,str) else s for s in scoring}
-
-    for name, scorer in scorers.items():
-        if scorer._response_method == 'predict':
-            score = apply_scorer(y_true, y_pred['predict'], scorer)
-        elif scorer._response_method == 'predict_proba':
-            score = apply_scorer(y_true, y_pred.drop(columns='predict'), scorer)#[estimator.classes_])
-        scores[name] = score
-    return scores
-
-def apply_scorer(y_true, y_pred, scorer: _Scorer, **kwargs):
-    # Copy of part of _scorer.py:_Scorer._score() method
-    scoring_kwargs = {**scorer._kwargs, **kwargs}
-    return scorer._sign * scorer._score_func(y_true, y_pred, **scoring_kwargs)
-
-def predict_and_score(
-    estimator: BaseEstimator,
-    X: DataFrame,
-    y: Series,
-    scoring: str | Iterable[str] | Iterable[_Scorer],
-) -> tuple[DataFrame, Series]:
-    start = time.perf_counter()
-    y_pred = predict(estimator, X)
-    scores = apply_scorers(y, y_pred, scoring)
-    scores['score_time'] = time.perf_counter() - start
-    scores = pd.Series(scores)
-    return y_pred, scores
-
-def predict(
-    estimators,
-    X : DataFrame,
-    proba    : bool = True,
-    simplify : bool = False,
-    **kwargs,
-) -> DataFrame:
-    if isinstance(estimators, BaseEstimator):
-        return _predict(estimators, X, proba, simplify)
-
-    if isinstance(estimators, dict):
-        if 'keys' not in kwargs:
-            kwargs['keys'] = list(estimators.keys())
-        estimators = list(estimators.values())
-    return pd.concat(
-        [_predict(est, X) for est in estimators],
-        axis = 1,
-        **kwargs,
-    )
-
-def combine_predictions(predictions):
-    target_dtype = predictions[(predictions.columns.levels[0][0], 'predict')].dtype
-    return (predictions
-        .stack(['split', 'prob/predict'], future_stack=True)
-        .dropna()
-        .unstack('prob/predict')
-        # Option 1) Keep split as index (helpful if test folds overlap)
-        # <NoOp>
-        # Option 2) Keep split as column
-        #.reset_index(level='split')
-        # Option 3) Drop split
-        #.reset_index(level='split', drop=True)
-        .astype({'predict' : target_dtype})
-    )
-
-def add_index_level(
-    df   : DataFrame,
-    label: str,
-    name : str,
-    axis : Literal[0,1] = 0,
-    level: int = 0
-) -> DataFrame:
-    index  = df.axes[axis]
-    level_labels = [index.to_list()]
-    names  = list(index.names)
-    level_labels.insert(level, [label])
-    names.insert(level, name)
-    return df.set_axis(
-        labels = pd.MultiIndex.from_product(level_labels, names = names),
-        axis = axis,
-    )
-
-def to_cross_validate_dataframes(
-    results : dict,
-    data_index : pd.Index,
-    split_names : list[Any],
-) -> tuple[DataFrame, DataFrame | None]:
-    """Convert cross_validate results into pandas DataFrames"""
-    is_test_data = None
-    if 'indices' in results:
-        n_splits = len(results['fit_time'])
-        is_test_data = DataFrame(
-            None,
-            index = data_index,
-            columns = split_names,
-            dtype = 'bool',
-        ).rename_axis(index = data_index.name, columns='split')
-        for i in range(n_splits):
-            is_test_data.iloc[results['indices']['train'][i], i] = False
-            is_test_data.iloc[results['indices']['test'][i], i] = True
-
-    results_df = (
-        DataFrame(
-            data = {k : v for k,v in results.items() if k != 'indices'},
-        )
-        .rename_axis(index='split')
-        .rename(split_names.__getitem__)
-    )
-    return results_df, is_test_data
-
-def read_data(
-    path: Path,
-    **kwargs,
-) -> DataFrame:
+################################################################################
+def read_data(path: Path, **kwargs) -> DataFrame:
     if path.suffix == '.csv':
         data = pd.read_csv(path, **kwargs)
     elif path.suffix in ('.hdf', '.hdf5'):
         data = pd.read_hdf(path, **kwargs)
+    elif path.suffix in ('.parquet'):
+        data = pd.read_parquet(path, **kwargs)
     else:
         raise NotImplementedError(
             f'No reader implemented for files of type {path.suffix}'
@@ -466,18 +328,185 @@ def build_train_test_iterator(
 
     return tt_iter
 
-
-
 def build_model_selector(estimator: BaseEstimator, param_grid: dict = None, **kwargs) -> BaseEstimator:
     return GridSearchCV(estimator, **kwargs)
 
-# def get_config(args: argparse.Namespace):
-#     default_cfg = load_default_config()
-#     override_cfgs = (scripting.read_config(Path(p)) for p in args.configs)
-#     cfg = scripting.merge_config_files(override_cfgs, default_cfg)
-#     cfg = override_config(cfg, args)
-#     validate_config(cfg)
-#     return cfg
+def save_results(odir: Path, results: FitSupervisedModelResults) -> None:
+    # TODO: Enable saving to different formats (e.g. hdf, parquet, feather, etc.)
+    if (fits := results.get('fits')) is not None:
+        if 'estimator' in fits.columns:
+            estimators = fits['estimator']
+            fits = fits.drop(columns='estimator')
+            (odir / 'models').mkdir()
+            for split, est in estimators.items():
+                opath = odir / f'models/estimator_{split}.pkl'
+                # TODO: Enable saving in ONNX format
+                with opath.open('wb') as ofile:
+                    pickle.dump(est, ofile, protocol=pickle.HIGHEST_PROTOCOL)
+                log.info('Estimator saved: %s', opath)
+
+        opath = odir / 'fits.csv'
+        fits.to_csv(opath)
+        log.info('Saved fit results: %s', opath)
+
+    if (is_test_data := results.get('is_test_data')) is not None:
+        opath = odir / 'is_test_data.csv'
+        is_test_data.to_csv(opath)
+        log.info('Saved fit results: %s', opath)
+
+    if (y_pred := results.get('y_pred')) is not None:
+        opath = odir / 'y_pred.csv'
+        y_pred.to_csv(opath)
+        log.info('Saved fit results: %s', opath)
+
+    if (feature_importances := results.get('feature_importances')) is not None:
+        opath = odir / 'feature_importances.csv'
+        feature_importances.to_csv(opath)
+        log.info('Saved fit results: %s', opath)
+
+def save_visualizations(results: FitSupervisedModelResults, cfg: dict) -> None:
+    pass
+
+################################################################################
+def check_is_partition(df: DataFrame) -> bool:
+    return df.sum(axis=1).unique().tolist() == [1]
+
+def to_cross_validate_dataframes(
+    results : dict,
+    data_index : pd.Index,
+    split_names : list[Any],
+) -> tuple[DataFrame, DataFrame | None]:
+    """Convert cross_validate results into pandas DataFrames"""
+    is_test_data = None
+    if 'indices' in results:
+        n_splits = len(results['fit_time'])
+        is_test_data = DataFrame(
+            None,
+            index = data_index,
+            columns = split_names,
+            dtype = 'bool',
+        ).rename_axis(index = data_index.name, columns='split')
+        for i in range(n_splits):
+            is_test_data.iloc[results['indices']['train'][i], i] = False
+            is_test_data.iloc[results['indices']['test'][i], i] = True
+
+    results_df = (
+        DataFrame(
+            data = {k : v for k,v in results.items() if k != 'indices'},
+        )
+        .rename_axis(index='split')
+        .rename(split_names.__getitem__)
+    )
+    return results_df, is_test_data
+
+################################################################################
+def parse_argv() -> argparse.Namespace:
+    """Parse command line arguments (i.e. sys.argv)"""
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-c",
+        "--configs",
+        nargs="+",
+        default=[],
+        help="Configuration files",
+    )
+    parser.add_argument(
+        "-i",
+        "--input",
+        type=Path,
+        help="Path to input training data",
+    )
+    parser.add_argument(
+        "-o",
+        "--odir",
+        type=Path,
+        help="Directory for saving all outputs",
+    )
+    parser.add_argument(
+        "--overwrite",
+        action='store_true',
+        help="Overwrite output directory",
+    )
+    parser.add_argument(
+        "--estimator",
+        help="Estimator to fit",
+    )
+    parser.add_argument(
+        "--cv",
+        help="Train-test iterator to pass to cross_validate",
+    )
+    parser.add_argument(
+        "-l",
+        "--log-level",
+        choices=logging_utils.LOG_LEVEL_CHOICES,
+        help="Root logging level",
+    )
+    parser.add_argument(
+        "--log-file",
+        action = 'store_true',
+        help="Save logs to file in output directory",
+    )
+    parser.add_argument(
+        "--log-cli-level",  # log_cli_level
+        choices=logging_utils.LOG_LEVEL_CHOICES,
+        help="CLI logging level (if different from log-level)",
+    )
+    return parser.parse_args()
+
+def get_config(args: argparse.Namespace):
+    default_cfg = get_default_cfg_supervised()
+    if args:
+        override_cfgs = (yaml.safe_load(Path(p).open()) for p in args.configs)
+        cfg = scripting.merge_config_files(override_cfgs, default_cfg)
+    else:
+        cfg = default_cfg
+    cfg = override_config(cfg, args)
+    validate_config(cfg)
+    return cfg
+
+def override_config(cfg: dict, args: argparse.Namespace, copy: bool = True) -> dict:
+    """Override configuration settings with command line arguments."""
+    if copy:
+        cfg = deepcopy(cfg)
+    if args.input:
+        cfg["input"]["path"] = str(args.input)
+    if args.odir:
+        cfg["outputs"]["path"] = str(args.odir)
+    if args.overwrite:
+        cfg["outputs"]["overwrite"] = args.overwrite
+    if args.estimator:
+        cfg['estimator'] = args.estimator
+    if args.cv:
+        cfg['train_test_iterator']['name'] = args.cv
+    # Logging
+    log_cfg = cfg["logging"]
+    if args.log_level and "level" in log_cfg:
+            log_cfg["level"] = args.log_level
+    if args.log_file and "filename" in log_cfg:
+            log_cfg["filename"] = 'run.log'
+    # args.log_cli_level handled in main()
+    return cfg
+
+def validate_config(cfg: dict) -> None:
+    messages = []
+    if cfg['input']['path'] is None:
+        messages.append(
+            'Input data not specified. Use --input CLI arg or input.path in config'
+        )
+    if cfg['outputs']['path'] is None:
+        messages.append(
+            'Output directory not specified. Use --odir CLI arg or outputs.path in config'
+        )
+    elif not (parent := Path(cfg['outputs']['path']).parent).is_dir():
+        messages.append(
+            f'Output directory parent path does not exist: {parent}'
+        )
+    if cfg['estimator'] is None:
+        messages.append(
+            'Estimator is not specified. Use --estimator CLI arg or estimator in config'
+        )
+    if len(messages) > 0:
+        raise RuntimeError('Invalid configuration:\n\t- ' + '\n\t- '.join(messages))
 
 if __name__ == '__main__':
     main()
