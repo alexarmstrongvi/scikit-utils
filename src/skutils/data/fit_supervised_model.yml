@@ -1,29 +1,32 @@
 # Path to training data in a format accepted by pandas (e.g. read_csv, read_hdf)
 input:
-  path : null
-  # TODO: data, model, predictions, is_test_data
+    path : null
+    # TODO: data, model, predictions, is_test_data
 
 outputs:
-  # Output directory for saving outputs
-  path : null
-  # Overwrite output directory if it exists. Otherwise, ask user for input.
-  overwrite : False
-  # Create timestamp sub-directory in `path` for saving outputs instead of
-  # saving directly to `path`.
-  create_subdir : False
-  # Output toggles
-  save_test_scores         : true
-  save_train_scores        : false
-  save_estimators          : false
-  save_test_predictions    : false
-  save_train_predictions   : false
-  save_indices             : false
-  save_feature_importances : false
-  # TODO: visualization outputs
-  # save_confusion_matrix_plot : True
-  # save_roc_plot : True
-  # save_prob_plot: False
-  # save_feature_plots: False
+    # Path to directory for saving all outputs
+    path : null
+    # Save all outputs in a timestamped subdirectory of `path`
+    timestamp_subdir : false
+    # Overwrite output directory if it exists. Otherwise, ask user for input.
+    overwrite : false
+    # Toggles for each output
+    save_input_configs       : false
+    save_final_config        : true
+    save_git_diff            : false
+    # Output toggles
+    save_test_scores         : true
+    save_train_scores        : false
+    save_estimators          : false
+    save_test_predictions    : false
+    save_train_predictions   : false
+    save_indices             : false
+    save_feature_importances : false
+    # TODO: visualization outputs
+    # save_confusion_matrix_plot : True
+    # save_roc_plot : True
+    # save_prob_plot: False
+    # save_feature_plots: False
 
 
 random_seed: 0

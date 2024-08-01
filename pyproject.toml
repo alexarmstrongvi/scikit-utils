@@ -34,12 +34,18 @@ dev = [
     "pre-commit",
 ]
 
+[project.scripts]
+skutils = "skutils.bin.run_skutils:main"
+
 ################################################################################
 [tool.setuptools.dynamic]
 version = {attr = "skutils.__version__"}
 
 [tool.pytest.ini_options]
 addopts = "--doctest-modules --ignore bin"
+filterwarnings = [
+    'ignore:datetime.datetime.utcfromtimestamp:DeprecationWarning:dateutil'
+]
 
 [tool.isort]
 import_heading_stdlib = "Standard library"

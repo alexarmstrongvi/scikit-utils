@@ -20,17 +20,16 @@ Usage
 
 The main entrypoint is the `skutils` CLI program
 ```sh
-skutils run -i data.csv -o my_outputs/
-skutils preprocess -i data.csv -o my_outputs/
-skutils fit -i my_outputs/ -o my_outputs/
-skutils score -i my_outputs/ -o my_outputs/
-skutils visualize -i my_outputs/ -o my_outputs/
+skutils supervised run -i data.csv -o my_outputs/
+skutils supervised score -i my_outputs/ -o my_outputs/scores/
+skutils supervised visualize -i my_outputs/ -o my_outputs/visualizations/
 ```
 
 For the full list of command line options, use the help option
 ```sh
 skutils -h
-skutils run -h
+skutils supervised -h
+skutils supervised run -h
 ...
 ```
 

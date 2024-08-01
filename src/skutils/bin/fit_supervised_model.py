@@ -6,25 +6,21 @@ Configurable script for fitting supervised models
 import argparse
 from collections.abc import Collection
 from copy import deepcopy
-from datetime import datetime
 import logging
 from pathlib import Path
 import pickle
-import pprint
-import shutil
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 # 3rd party
 import numpy as np
 import pandas as pd
 from pandas import DataFrame, Series
-import sklearn
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import GridSearchCV, cross_validate
 import yaml
 
 # 1st party
-from skutils import git, logging_utils, scripting
+from skutils import logging_utils, scripting
 from skutils.data import get_default_cfg_supervised
 from skutils.import_utils import import_object
 from skutils.pipeline import make_pipeline
@@ -36,7 +32,6 @@ log = logging.getLogger(Path(__file__).stem)
 
 # Configuration
 logging.getLogger('asyncio').setLevel('WARNING')
-sklearn.set_config(transform_output='pandas')
 
 # TODO: Update to work on multi-class problems
 # TODO: Update to work on multi-label problems
@@ -44,53 +39,17 @@ sklearn.set_config(transform_output='pandas')
 # TODO: Update to enable hyperparameter searching
 # TODO: Update to enable feature selection
 ################################################################################
-def main():
-    args = parse_argv()
-    cfg  = get_config(args)
-
+def main(cfg):
+    icfg = cfg.pop('input')
+    ipath = Path(icfg.pop('path'))
     ocfg = cfg['outputs']
     odir = Path(ocfg['path'])
 
-    # Setup
-    if ocfg["timestamp_subdir"]:
-        odir.mkdir(exist_ok=True)
-        odir = odir / datetime.now().strftime("%Y%m%d_%H%M%S")
-    scripting.require_empty_dir(odir, overwrite=ocfg['overwrite'])
-    logging_utils.update_log_filenames(odir, cfg['logging'])
-    logging_utils.configure_logging(**cfg['logging'])
-    logging_utils.require_root_console_handler(args.log_cli_level)
-    log.debug("Logging Summary:\n%s", logging_utils.summarize_logging())
-
-    # Reproducibility
-    log.debug("Final configuration:\n%s", pprint.pformat(cfg, indent=4))
-    if ocfg['save_input_configs']:
-        buf = len(args.configs)
-        for i, path in enumerate(args.configs):
-            opath = odir / f'config_input{i:0{buf}d}_{Path(path).stem}.yml'
-            shutil.copyfile(path, opath)
-            log.info("Input configuration saved: %s", opath)
-    if ocfg['save_final_config']:
-        opath = odir / "config.yml"
-        yaml.safe_dump(cfg, opath.open("w"))
-        log.info("Final configuration saved: %s", opath)
-
-    if (working_dir := git.find_working_dir(Path(__file__))) is not None:
-        log.debug("Version Control Summary:\n%s", git.summarize_version_control(working_dir))
-        if ocfg['save_git_diff']:
-            opath = odir / "git_diff.patch"
-            opath.write_text(git.get_diff(working_dir))
-            log.info("Git diff patch saved: %s", opath)
-
-    ########################################
-    # Run
-    ########################################
-    icfg = cfg.pop('input')
-    ipath = Path(icfg.pop('path'))
     data = read_data(ipath, **icfg)
     results = fit_supervised_model(data, cfg)
 
     if (fits := results.get('fits')) is not None:
-        log.info('Fit results:\n%s', fits.drop(columns='estimators', errors='ignore'))
+        log.info('Fit results:\n%s', fits.drop(columns='estimator', errors='ignore'))
 
     # log.info('Saving results')
     save_results(odir, results)
@@ -106,7 +65,6 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
     # TODO: Split up cfg into kwargs once there is a stable format
     ocfg = cfg['outputs']
 
-    # reformat_cfg()
     ########################################
     # Checks
     if not any(ocfg.values()):
@@ -250,6 +208,8 @@ def read_data(path: Path, **kwargs) -> DataFrame:
         data = pd.read_hdf(path, **kwargs)
     elif path.suffix in ('.parquet'):
         data = pd.read_parquet(path, **kwargs)
+    elif path.suffix in ('.feather'):
+        data = pd.read_feather(path, **kwargs)
     else:
         raise NotImplementedError(
             f'No reader implemented for files of type {path.suffix}'
@@ -271,8 +231,6 @@ def preprocess_data(
     missing data) in order to avoid data leakage. Such transformations should be
     part of the estimator pipeline created in build_estimator
     '''
-
-
     if target_map is not None:
         data[target] = data[target].map(target_map)
 
@@ -348,7 +306,7 @@ def save_results(odir: Path, results: FitSupervisedModelResults) -> None:
             fits = fits.drop(columns='estimator')
             (odir / 'models').mkdir()
             for split, est in estimators.items():
-                opath = odir / f'models/estimator_{split}.pkl'
+                opath = odir / f'models/{est.__class__.__name__}_{split}.pkl'
                 # TODO: Enable saving in ONNX format
                 with opath.open('wb') as ofile:
                     pickle.dump(est, ofile, protocol=pickle.HIGHEST_PROTOCOL)
@@ -361,17 +319,17 @@ def save_results(odir: Path, results: FitSupervisedModelResults) -> None:
     if (is_test_data := results.get('is_test_data')) is not None:
         opath = odir / 'is_test_data.csv'
         is_test_data.to_csv(opath)
-        log.info('Saved fit results: %s', opath)
+        log.info('Saved test data per split flags: %s', opath)
 
     if (y_pred := results.get('y_pred')) is not None:
         opath = odir / 'y_pred.csv'
         y_pred.to_csv(opath)
-        log.info('Saved fit results: %s', opath)
+        log.info('Saved predictions: %s', opath)
 
     if (feature_importances := results.get('feature_importances')) is not None:
         opath = odir / 'feature_importances.csv'
         feature_importances.to_csv(opath)
-        log.info('Saved fit results: %s', opath)
+        log.info('Saved feature importances results: %s', opath)
 
 def save_visualizations(results: FitSupervisedModelResults, cfg: dict) -> None:
     pass
@@ -390,10 +348,10 @@ def to_cross_validate_dataframes(
     if 'indices' in results:
         n_splits = len(results['fit_time'])
         is_test_data = DataFrame(
-            None,
+            pd.NA,
             index = data_index,
             columns = split_names,
-            dtype = 'bool',
+            dtype = 'boolean',
         ).rename_axis(index = data_index.name, columns='split')
         for i in range(n_splits):
             is_test_data.iloc[results['indices']['train'][i], i] = False
@@ -412,10 +370,18 @@ def to_cross_validate_dataframes(
 def parse_argv() -> argparse.Namespace:
     """Parse command line arguments (i.e. sys.argv)"""
     parser = argparse.ArgumentParser()
+    add_arguments(parser, start_stage='run')
+    return parser.parse_args()
+
+def add_arguments(
+    parser: argparse.ArgumentParser,
+    start_stage : Literal["run", "score", "visualize"],
+) -> argparse.ArgumentParser:
     parser.add_argument(
         "-c",
         "--configs",
         nargs="+",
+        metavar='PATH',
         default=[],
         help="Configuration files",
     )
@@ -423,12 +389,14 @@ def parse_argv() -> argparse.Namespace:
         "-i",
         "--input",
         type=Path,
+        metavar='PATH',
         help="Path to input training data",
     )
     parser.add_argument(
         "-o",
         "--odir",
         type=Path,
+        metavar='PATH',
         help="Directory for saving all outputs",
     )
     parser.add_argument(
@@ -436,14 +404,18 @@ def parse_argv() -> argparse.Namespace:
         action='store_true',
         help="Overwrite output directory",
     )
-    parser.add_argument(
-        "--estimator",
-        help="Estimator to fit",
-    )
-    parser.add_argument(
-        "--cv",
-        help="Train-test iterator to pass to cross_validate",
-    )
+
+    # TODO: if start_stage <= MLStages.FIT:
+    if start_stage == 'run':
+        parser.add_argument(
+            "--estimator",
+            help="Estimator to fit",
+        )
+        parser.add_argument(
+            "--cv",
+            help="Train-test iterator to pass to cross_validate",
+        )
+
     parser.add_argument(
         "-l",
         "--log-level",
@@ -460,7 +432,7 @@ def parse_argv() -> argparse.Namespace:
         choices=logging_utils.LOG_LEVEL_CHOICES,
         help="CLI logging level (if different from log-level)",
     )
-    return parser.parse_args()
+    return parser
 
 def get_config(args: argparse.Namespace):
     default_cfg = get_default_cfg_supervised()
@@ -517,5 +489,6 @@ def validate_config(cfg: dict) -> None:
     if len(messages) > 0:
         raise RuntimeError('Invalid configuration:\n\t- ' + '\n\t- '.join(messages))
 
-if __name__ == '__main__':
-    main()
+# Accessed through run_skutils:main
+# if __name__ == '__main__':
+#     main()

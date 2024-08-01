@@ -17,8 +17,8 @@ log = logging.getLogger(__name__)
 # Format options
 # LOG_FMT_DEFAULT ="%(levelname)8s | %(message)s"
 # LOG_FMT_DEFAULT ="%(levelname)8s | %(module)s :: %(message)s"
-# LOG_FMT_DEFAULT ="%(levelname)8s | %(name)s :: %(message)s"
-LOG_FMT_DEFAULT = "%(levelname)8s | %(name_last)s :: %(message)s"
+LOG_FMT_DEFAULT ="%(levelname)8s | %(name)s :: %(message)s"
+# LOG_FMT_DEFAULT = "%(levelname)8s | %(name_last)s :: %(message)s"
 # LOG_FMT_DEFAULT ="[%(asctime)s] %(levelname)8s | (%(filename)s) %(message)s"
 # LOG_FMT_DEFAULT = "%(levelname)8s | (%(module)s:%(funcName)s():L%(lineno)d) %(message)s"
 
@@ -35,6 +35,8 @@ def configure_logging(
     """Configure logging with any of the available logging config APIs."""
     # Update log files to be within output dir
     if len(basic_config) > 0:
+        if 'format' not in basic_config:
+            basic_config['format'] = LOG_FMT_DEFAULT
         logging.basicConfig(**basic_config)
 
     if file_config is not None:
