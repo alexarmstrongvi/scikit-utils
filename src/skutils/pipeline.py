@@ -84,24 +84,17 @@ def _make_pipeline_steps(steps: list[str | list[str | dict]]) -> tuple[bool | No
 def _parse_pipeline_config(cfg: str | list[str | dict]) -> tuple[str | None, str, dict]:
     match cfg:
         # make_pipeline format
-        case [class_] | class_ if isinstance(class_, str):
+        case [str(class_)] | str(class_):
             name, kw = None, {}
-        case [class_, kw] if isinstance(kw, dict):
+        case [str(class_), dict(kw)]:
             name = None
         # Pipeline format
-        case [name, class_]:
+        case [str(name), str(class_)]:
             kw = {}
-        case [name, class_, kw]:
+        case [str(name), str(class_), dict(kw)]:
             pass
         case _:
             raise ValueError(f'Unexpected transformer configuration: {cfg!r}')
-
-    if not (
-        (name is None or isinstance(name, str))
-        and isinstance(class_, str)
-        and isinstance(kw, dict)
-    ):
-        raise TypeError(f'Invalid pipeline step configuration: {cfg!r}')
 
     return name, class_, kw
 
@@ -109,25 +102,20 @@ def _parse_pipeline_config(cfg: str | list[str | dict]) -> tuple[str | None, str
 def _parse_column_transformer_config(cfg: list[str | list | dict]) -> tuple[str | None, str, dict, str | list[str] | dict]:
     match cfg:
         # make_column_transformer format
-        case [class_, columns]:
+        case [str(class_), columns]:
             name, kw = None, {}
-        case [class_, kw, columns] if isinstance(kw, dict):
+        case [str(class_), dict(kw), columns]:
             name = None
         # ColumnTransformer format
-        case [name, class_, columns]:
+        case [str(name), str(class_), columns]:
             kw = {}
-        case [name, class_, kw, columns]:
+        case [str(name), str(class_), dict(kw), columns]:
             pass
         case _:
             raise ValueError(f'Unexpected transformer configuration: {cfg}')
 
     # Check
-    if not (
-        (name is None or isinstance(name, str))
-        and isinstance(class_, str)
-        and isinstance(kw, dict)
-        and isinstance(columns, (str, list, dict))
-    ):
+    if not isinstance(columns, (str, list, dict)):
         raise TypeError(f'Invalid transformer configuration: {cfg}')
 
     return name, class_, kw, columns

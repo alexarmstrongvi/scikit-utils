@@ -7,16 +7,17 @@ import logging
 import numpy as np
 import pandas as pd
 import pytest
-from sklearn.datasets import make_classification
+from sklearn.datasets import make_classification, make_regression
+from sklearn.ensemble import ExtraTreesClassifier, ExtraTreesRegressor
 
 # 1st party
-from skutils.bin.fit_supervised_model import fit_supervised_model
+from skutils.bin.fit_supervised_model import fit_supervised_model, predict
 from skutils.data import get_default_cfg_supervised
 
 logging.getLogger('asyncio').setLevel('WARNING')
 
 def test_fit_supervised_model():
-    data_cfg = dict(
+    X, y = make_classification(
         n_samples            = 100,
         n_features           = 2,
         n_informative        = 2,
@@ -26,12 +27,14 @@ def test_fit_supervised_model():
         n_clusters_per_class = 1,
         random_state         = 0,
     )
-    X, y = make_classification(**data_cfg)
     data = pd.DataFrame(
         X,
         columns = [f'Feature {i}' for i in range(X.shape[1])],
     ).assign(target=y)
     cfg = get_default_cfg_supervised()
+
+    cfg['estimator'] = 'ExtraTreesClassifier'
+    cfg['fit']['scoring'] = ['accuracy']
 
     ########################################
     # Test default train-test evaluation
@@ -59,7 +62,18 @@ def test_fit_supervised_model():
     assert results['fits'].notna().all().all()
 
     # Test single output enabled
+    skip_params = {
+        # These do not toggle fit outputs
+        'path',
+        'timestamp_subdir',
+        'overwrite',
+        'save_input_configs',
+        'save_final_config',
+        'save_git_diff',
+    }
     for save_key in cfg['outputs']:
+        if save_key in skip_params:
+            continue
         cfg_mod = copy.deepcopy(cfg_mod_no_out)
         cfg_mod['outputs'][save_key] = True
         results = fit_supervised_model(data, cfg_mod)
@@ -157,6 +171,100 @@ def test_fit_supervised_model():
 
     # Test X: Multiclass & multilabel classifier
 
+def test_fit_supervised_model_regression():
+    cfg = get_default_cfg_supervised()
+    cfg['estimator'] = 'ExtraTreesRegressor'
+
+    # Test regression
+    X, y = make_regression(
+        n_samples            = 100,
+        n_features           = 2,
+        n_informative        = 2,
+        random_state         = 0,
+    )
+    data = pd.DataFrame(
+        X,
+        columns = [f'Feature {i}' for i in range(X.shape[1])],
+    ).assign(target=y)
+
+    cfg_mod = copy.deepcopy(cfg)
+    cfg_mod['train_test_iterator'] = {'name' : 'KFold'}
+    cfg_mod['outputs'] = {k : True for k in cfg_mod['outputs']}
+    cfg_mod['train_on_all'] = True
+    results = fit_supervised_model(data, cfg_mod)
+
+    fits                = results['fits']
+    is_test_data        = results['is_test_data']
+    y_pred              = results['y_pred']
+    feature_importances = results['feature_importances']
+
+    split_names = fits.index
+
+    assert 'all' in split_names
+
+    _test_fits(fits)
+    _test_is_test_data(is_test_data, split_names)
+    _test_y_pred(y_pred, split_names)
+    _test_feature_importances(feature_importances, split_names)
+
+    # Check indices are the same across result outputs
+    pd.testing.assert_index_equal(y_pred.index, is_test_data.index)
+    pd.testing.assert_index_equal(y_pred.index, data.index, check_names=False)
+
+def test_predict():
+    # Test with classifier
+    X, y = make_classification(
+        n_samples            = 100,
+        n_features           = 2,
+        n_informative        = 2,
+        n_redundant          = 0,
+        n_repeated           = 0,
+        n_classes            = 2,
+        n_clusters_per_class = 1,
+        random_state         = 0,
+    )
+    X_clf = pd.DataFrame(X, columns = [f'Feature {i}' for i in range(X.shape[1])])
+    y_clf = pd.Series(y, name='target')
+
+    clf = ExtraTreesClassifier().fit(X_clf, y_clf)
+    pred_clf = predict(clf, X_clf)
+    np.testing.assert_array_equal(pred_clf.columns, ['prob(0)', 'prob(1)', 'predict'])
+    pd.testing.assert_index_equal(pred_clf.index, X_clf.index)
+    assert pred_clf['predict'].dtype is y_clf.dtype
+
+    pred_clf = predict(clf, X_clf, proba=False)
+    np.testing.assert_array_equal(pred_clf.columns, ['predict'])
+    pd.testing.assert_index_equal(pred_clf.index, X_clf.index)
+    assert pred_clf['predict'].dtype is y_clf.dtype
+
+    pd.testing.assert_frame_equal(pred_clf, predict(clf, X_clf, proba=False, simplify=True))
+
+    pred_clf = predict(clf, X_clf, simplify=True)
+    np.testing.assert_array_equal(pred_clf.columns, ['prob(0)'])
+    pd.testing.assert_index_equal(pred_clf.index, X_clf.index)
+
+    # TODO: Add multi-class classifier outputs
+
+    # TODO: Add multi-label classifier outputs
+
+    # Test with regressor
+    X, y = make_regression(
+        n_samples            = 100,
+        n_features           = 2,
+        n_informative        = 2,
+        random_state         = 0,
+    )
+    X_reg = pd.DataFrame(X, columns = [f'Feature {i}' for i in range(X.shape[1])])
+    y_reg = pd.Series(y, name='target')
+
+    reg = ExtraTreesRegressor().fit(X_reg, y_reg)
+    pred_reg = predict(reg, X_reg)
+    np.testing.assert_array_equal(pred_reg.columns, ['predict'])
+    pd.testing.assert_index_equal(pred_reg.index, X_reg.index)
+    assert pred_reg['predict'].dtype is y_reg.dtype
+
+    # TODO: Add multi-label regressor outputs
+
 def _test_fits(fits: pd.DataFrame) -> None:
     assert fits.notna().all().all()
     assert pd.api.types.is_float_dtype(fits['fit_time'])
@@ -175,18 +283,16 @@ def _test_is_test_data(is_test_data: pd.DataFrame, split_names: pd.Index) -> Non
 def _test_y_pred(y_pred: pd.DataFrame, split_names: pd.Index) -> None:
     index_names = list(y_pred.index.names)
     if index_names == ['index']:
+        n_classes = len(y_pred[split_names[0]].columns) - 1
+        pred_cols = pd.Index([f'prob({i})' for i in range(n_classes)] + ['predict'], name='pred')
         pd.testing.assert_index_equal(y_pred.columns.levels[0], split_names)
-        pd.testing.assert_index_equal(
-            y_pred.columns.levels[1],
-            pd.Index([0, 1, 'predict'], name='prob/predict')
-        )
+        pd.testing.assert_index_equal(y_pred.columns.levels[1], pred_cols)
         # There should be at least one result for each data row across all splits
-        assert y_pred.stack('prob/predict', future_stack=True).notna().any(axis=1).all()
+        assert y_pred.stack('pred', future_stack=True).notna().any(axis=1).all()
     elif index_names == ['index', 'split']:
-        pd.testing.assert_index_equal(
-            y_pred.columns,
-            pd.Index([0, 1, 'predict'], name='prob/predict')
-        )
+        n_classes = len(y_pred.columns) - 1
+        pred_cols = pd.Index([f'prob({i})' for i in range(n_classes)] + ['predict'], name='pred')
+        pd.testing.assert_index_equal(y_pred.columns, pred_cols)
         assert y_pred.notna().all().all()
     else:
         assert False, f'Unexpected index names: {y_pred.index.names}'

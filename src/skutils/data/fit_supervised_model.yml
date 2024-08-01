@@ -25,32 +25,32 @@ outputs:
   # save_prob_plot: False
   # save_feature_plots: False
 
-logging: null
 
 random_seed: 0
 
 preprocess:
-  features   : null
-  target     : target
-  index      : null # passed to DataFrame.set_index(index)
-  target_map : null # passed to DataFrame[target].map(target_map)
-  astype     : null # passed to DataFrame.astype(astype)
+    features   : null   # X = df[features]
+    target     : target # y = df[target]
+    index      : null   # df.set_index(index)
+    target_map : null   # df[target] = df[target].map(target_map)
+    astype     : null   # df = df.astype(astype)
+    # TODO: positive_class : null
 
 model_selector: null
 
 train_test_iterator:
-  # Option 1)
-  name: train_test_split
-  # Option 2) sklearn CrossValidator on all data
-  # name: KFold
-  # n_splits: 5
-  # Option 3) KFold on train set + evaluation
-  # Option 4) Custom
-  # name: skutils.train_test_iterators.AblationSplit
-  # kfold_cv:
-  #   name:
+    # Option 1)
+    name: train_test_split
+    # Option 2) sklearn CrossValidator on all data
+    # name: KFold
+    # n_splits: 5
+    # Option 3) KFold on train set + evaluation
+    # Option 4) Custom
+    # name: skutils.train_test_iterators.AblationSplit
+    # kfold_cv:
+    #   name:
 
-  # TODO: Option X) GridSearchCV on train set + evaluation of best model on test set
+    # TODO: Option X) GridSearchCV on train set + evaluation of best model on test set
 
 train_on_all : false
 
@@ -69,14 +69,14 @@ stack_split_predictions: true
 
 
 # TODO: Allow user to specify multiple estimators as a list or even "all Classifiers"
-estimator: ExtraTreesClassifier
+estimator: null
 
 fit:
-  # return_* keywords determined by save_* parameters in outputs section so no
-  # need to manually set them here
-  scoring:
-  - accuracy
-  # - neg_log_loss
+    # return_* keywords determined by save_* parameters in outputs section so no
+    # need to manually set them here
+    scoring: null
+    # - accuracy
+    # - neg_log_loss
 
 visualization:
   image_ext: .png
@@ -91,3 +91,18 @@ visualization:
       fp_count : null
   # TODO: Add other sklearn supported visualizations: confusion matrix, learning
   # curve, etc.
+
+logging:
+    # kwargs for logging.basicConfig()
+    format : '%(levelname)8s | %(module)s :: %(message)s'
+    level: INFO
+    force: True
+    filename : null #run.log
+    filemode : w
+    # kwargs for logging.dictConfig
+    # dict_config: null
+    #   Add below to temporarily change properties of a specific logger
+    #   disable_existing_loggers: False
+    #   loggers:
+    #     skutils.prediction:
+    #       level : 'DEBUG'

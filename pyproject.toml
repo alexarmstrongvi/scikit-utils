@@ -10,6 +10,7 @@ dependencies = [
     "scikit-learn",
     "seaborn",
     "shapely",  # Used in roc.py
+    "pyarrow",
     "pyyaml"
 ]
 
@@ -38,7 +39,7 @@ dev = [
 version = {attr = "skutils.__version__"}
 
 [tool.pytest.ini_options]
-addopts = "--doctest-modules"
+addopts = "--doctest-modules --ignore bin"
 
 [tool.isort]
 import_heading_stdlib = "Standard library"
@@ -50,6 +51,8 @@ multi_line_output = 3 # Vertical Hanging Indent
 
 [tool.pylint.main]
 recursive = true
+[tool.pylint.basic]
+good-names=["i", "j", "k", "ex", "Run", "_", "X"]
 [tool.pylint."MESSAGES CONTROL"]
 ignore = [".venv", ".tox", "docs", "build"]
 disable = [
