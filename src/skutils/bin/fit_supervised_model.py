@@ -128,9 +128,8 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
 
         n_splits = len(fit_results['fit_time'])
         # TODO: Allow user to provide format string (e.g. "Split {i}")
-        split_names = cfg['split_names'] or list(range(n_splits))
-        if cfg['train_on_all']:
-            split_names[-1] = 'all'
+        split_names = _get_split_names(cfg['split_names'], n_splits, cfg['train_on_all'])
+
         fit_results, is_test_data = to_cross_validate_dataframes(
             fit_results,
             data_index = X.index,
@@ -154,9 +153,9 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
                     predict(est, X[mask])
                     for est, mask in zip(fit_results['estimator'], masks)
                 ],
-                keys = split_names,
+                keys  = split_names,
                 names = ['split', 'pred'],
-                axis=1,
+                axis  = 1,
             )
 
             if cfg['stack_split_predictions']:
@@ -365,6 +364,42 @@ def to_cross_validate_dataframes(
         .rename(split_names.__getitem__)
     )
     return results_df, is_test_data
+
+def _get_split_names(
+    split_names  : list[Any] | str | None,
+    n_splits     : int,
+    train_on_all : bool,
+) -> list[str | int]:
+    if isinstance(split_names, list):
+        for i in range(len(split_names)):
+            if split_names[i] == 'all':
+                log.warning(
+                    '"all" is a reserved split name for train_on_all. '
+                    'Updating user provided split name to "ALL"'
+                )
+                split_names[i] = "ALL"
+
+    if isinstance(split_names, str):
+        split_names = [split_names.format(i) for i in range(n_splits - train_on_all)]
+    elif split_names is None:
+        split_names = list(range(n_splits - train_on_all))
+    elif len(split_names) + train_on_all < n_splits:
+        log.warning(
+            '%d split names provided for %d splits. Adding default names',
+            len(split_names), n_splits
+        )
+        split_names += [f'Split {i}' for i in range(len(split_names), n_splits)]
+    elif len(split_names) + train_on_all > n_splits:
+        log.warning(
+            '%d split names but only %d splits. Using first %d',
+            len(split_names), n_splits, n_splits
+        )
+        split_names = split_names[:n_splits]
+
+    if train_on_all:
+        split_names.append('all')
+
+    return split_names
 
 ################################################################################
 def parse_argv() -> argparse.Namespace:
