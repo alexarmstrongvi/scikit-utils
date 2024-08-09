@@ -1,0 +1,23 @@
+outputs:
+    pandas_format : csv
+    image_format: jpg
+    toggles:
+        save_input_configs       : false
+        save_final_config        : true
+        save_git_diff            : false
+        save_test_scores         : false
+        save_train_scores        : false
+        save_estimators          : false
+        save_test_predictions    : false
+        save_train_predictions   : false
+        save_indices             : false
+        save_feature_importances : false
+        save_confusion_matrix_plot : true
+        save_roc_curve_plot : true
+
+train_test_iterator:
+    name: KFold
+
+# train_on_all : True
+
+estimator: ExtraTreesClassifier

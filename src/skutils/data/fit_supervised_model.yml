@@ -10,23 +10,45 @@ outputs:
     timestamp_subdir : false
     # Overwrite output directory if it exists. Otherwise, ask user for input.
     overwrite : false
-    # Toggles for each output
-    save_input_configs       : false
-    save_final_config        : true
-    save_git_diff            : false
-    # Output toggles
-    save_test_scores         : true
-    save_train_scores        : false
-    save_estimators          : false
-    save_test_predictions    : false
-    save_train_predictions   : false
-    save_indices             : false
-    save_feature_importances : false
-    # TODO: visualization outputs
-    # save_confusion_matrix_plot : True
-    # save_roc_plot : True
-    # save_prob_plot: False
-    # save_feature_plots: False
+    # Format in which to save models to disk
+    # Choices: pkl, joblib, dill, cloudpickle, skops, onnx
+    # User responsible for installing required 3rd party libraries
+    model_format : pkl
+    # Format in which to save pandas DataFrame and Series objects to disk
+    # Choices: csv, json, html, xml, xlsx, hdf, feather, parquet, orc, stata, pkl
+    #   - see https://pandas.pydata.org/pandas-docs/stable/user_guide/io.html
+    # User responsible for installing required 3rd party libraries
+    pandas_format : feather
+    # Format in which to save plots
+    # Choices: see matplotlib.Figure.savefig
+    image_format : png # Any format that can passed to matplotlib Figure.savefig
+    # Toggles for which outputs to save
+    toggles:
+        # Reproducibility
+        save_input_configs       : false
+        save_final_config        : true
+        save_git_diff            : false
+        # Fitting
+        save_test_scores         : true
+        save_train_scores        : false
+        save_estimators          : false
+        save_test_predictions    : false
+        save_train_predictions   : false
+        save_indices             : false
+        # Analysis
+        save_feature_importances : false
+        # Visualization
+        save_confusion_matrix_plot       : false
+        save_roc_curve_plot              : false
+        save_det_curve_plot              : false
+        save_predicion_recall_curve_plot : false
+        save_calibration_plot            : false
+        save_prediction_error_plot       : false
+        save_partial_dependence_plot     : false
+        save_decision_bounary_plot       : false
+        save_learning_curve_plot         : false
+        save_validation_curve_plot       : false
+        save_feature_plots               : false
 
 
 random_seed: 0
@@ -37,23 +59,13 @@ preprocess:
     index      : null   # df.set_index(index)
     target_map : null   # df[target] = df[target].map(target_map)
     astype     : null   # df = df.astype(astype)
-    # TODO: positive_class : null
+
+# Value of target column to treat as positive class (only for classification)
+pos_label : null
 
 model_selector: null
 
-train_test_iterator:
-    # Option 1)
-    name: train_test_split
-    # Option 2) sklearn CrossValidator on all data
-    # name: KFold
-    # n_splits: 5
-    # Option 3) KFold on train set + evaluation
-    # Option 4) Custom
-    # name: skutils.train_test_iterators.AblationSplit
-    # kfold_cv:
-    #   name:
-
-    # TODO: Option X) GridSearchCV on train set + evaluation of best model on test set
+train_test_iterator : train_test_split
 
 train_on_all : false
 
@@ -82,18 +94,44 @@ fit:
     # - neg_log_loss
 
 visualization:
-  image_ext: .png
-  roc:
-    # TODO: simplify roc curve plotting functions
-    facet_grid: null # kwargs for seaborn.facetgrid
-    facet_grid_roc: null # kwargs for _facetgrid_plot_roc_curve
-    bootstrap: null # kwargs for roc.bootstrap
-    curve: null # kwargs for plot_roc_curve
-    scaling:
-      tp_count : null
-      fp_count : null
-  # TODO: Add other sklearn supported visualizations: confusion matrix, learning
-  # curve, etc.
+    # Classifier predict
+    ConfusionMatrixDisplay  : null # see metrics.ConfusionMatrixDisplay.from_predictions()
+    # Classifier proba
+    RocCurveDisplay         : null # see metrics.RocCurveDisplay.from_predictions
+    DetCurveDisplay         : null # see metrics.DetCurveDisplay.from_predictions
+    PrecisionRecallDisplay  : null # see metrics.PrecisionRecallDisplay.from_predictions
+    CalibrationDisplay      : null # see calibration.CalibrationDisplay
+    # Regression predict
+    PredictionErrorDisplay  : null # see metrics.PredictionErrorDisplay.from_predictions
+    # Other
+    PartialDependenceDisplay: null # see inspection.PartialDependenceDisplay.from_estimator
+    DecisionBoundaryDisplay : null # see inspection.DecisionBoundaryDisplay.from_estimator
+    LearningCurveDisplay    : null # see model_selection.LearningCurveDisplay.from_estimator
+    ValidationCurveDisplay  : null # see model_selection.ValidationCurveDisplay.from_estimator
+
+    roc:
+        # TODO: simplify roc curve plotting functions
+        facet_grid: null # kwargs for seaborn.facetgrid
+        facet_grid_roc: null # kwargs for _facetgrid_plot_roc_curve
+        bootstrap: null # kwargs for roc.bootstrap
+        curve: null # kwargs for plot_roc_curve
+        scaling:
+        tp_count : null
+        fp_count : null
+    # TODO: Add other sklearn supported visualizations: confusion matrix, learning
+    # curve, etc.
+
+# Toggle what gets returned by fit_supervised_model()
+# null -> determine automatically based on outputs to be saved
+returns:
+    return_y_true              : null
+    return_test_scores         : null
+    return_train_scores        : null
+    return_estimators          : null
+    return_test_predictions    : null
+    return_train_predictions   : null
+    return_indices             : null
+    return_feature_importances : null
 
 logging:
     # kwargs for logging.basicConfig()

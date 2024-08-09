@@ -59,6 +59,10 @@ def configure_logging(
     # Use at your own risk. See function docstring for warnings
     # capture_python_stdout()
 
+    # Disable NOTSET loggers from 3rd party packages
+    logging.getLogger('matplotlib').setLevel('WARNING')
+    logging.getLogger('asyncio').setLevel('WARNING') # for ipython
+
 
 def require_root_console_handler(level: Optional[LogLevel] = None) -> None:
     """Require the root logger have a console handler when using basicConfig
