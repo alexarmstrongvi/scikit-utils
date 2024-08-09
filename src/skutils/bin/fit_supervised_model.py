@@ -22,7 +22,7 @@ import yaml
 from skutils import logging_utils, plot, scripting
 from skutils.data import get_default_cfg_supervised
 from skutils.import_utils import import_object
-from skutils.persistance import dump_model, dump_pandas
+from skutils.persistance import dump_model, dump_pandas, read_pandas
 from skutils.pipeline import make_pipeline
 from skutils.prediction import combine_predictions, predict
 from skutils.train_test_iterators import TrainOnAllWrapper, TrainTestIterable
@@ -43,7 +43,7 @@ def main(cfg):
     ocfg = cfg.pop('outputs')
     _set_unset_returns(cfg['returns'], ocfg['toggles'])
 
-    data = read_data(ipath, **icfg)
+    data = read_pandas(ipath, **icfg)
     results = fit_supervised_model(data, cfg)
 
     if (fits := results.get('fits')) is not None:
@@ -207,21 +207,6 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
     return FitSupervisedModelResults(**results)
 
 ################################################################################
-def read_data(path: Path, **kwargs) -> DataFrame:
-    if path.suffix == '.csv':
-        data = pd.read_csv(path, **kwargs)
-    elif path.suffix in ('.hdf', '.hdf5'):
-        data = pd.read_hdf(path, **kwargs)
-    elif path.suffix == '.parquet':
-        data = pd.read_parquet(path, **kwargs)
-    elif path.suffix == '.feather':
-        data = pd.read_feather(path, **kwargs)
-    else:
-        raise NotImplementedError(
-            f'No reader implemented for files of type {path.suffix}'
-        )
-    return data
-
 def preprocess_data(
     data       : pd.DataFrame,
     *,
@@ -324,7 +309,7 @@ def _save_results(
 
     if cfg_save['save_test_scores'] or cfg_save['save_train_scores']:
         fits = results['fits']
-        opath = odir / 'fits.{ext_pandas}'
+        opath = odir / f'fits.{ext_pandas}'
         dump_pandas(fits.drop(columns='estimator', errors='ignore'), opath)
         log.info('Saved fit results: %s', opath)
 
