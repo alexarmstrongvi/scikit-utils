@@ -8,7 +8,6 @@ from collections.abc import Collection
 from copy import deepcopy
 import logging
 from pathlib import Path
-import pickle
 from typing import Any, Literal, TypedDict
 
 # 3rd party
@@ -20,18 +19,16 @@ from sklearn.model_selection import GridSearchCV, cross_validate
 import yaml
 
 # 1st party
-from skutils import logging_utils, scripting
+from skutils import logging_utils, plot, scripting
 from skutils.data import get_default_cfg_supervised
 from skutils.import_utils import import_object
+from skutils.persistance import dump_model, dump_pandas
 from skutils.pipeline import make_pipeline
 from skutils.prediction import combine_predictions, predict
 from skutils.train_test_iterators import TrainOnAllWrapper, TrainTestIterable
 
 # Globals
 log = logging.getLogger(Path(__file__).stem)
-
-# Configuration
-logging.getLogger('asyncio').setLevel('WARNING')
 
 # TODO: Update to work on multi-class problems
 # TODO: Update to work on multi-label problems
@@ -40,10 +37,11 @@ logging.getLogger('asyncio').setLevel('WARNING')
 # TODO: Update to enable feature selection
 ################################################################################
 def main(cfg):
+    # Remove IO configs as they should not be used in fit_supervised_model()
     icfg = cfg.pop('input')
     ipath = Path(icfg.pop('path'))
-    ocfg = cfg['outputs']
-    odir = Path(ocfg['path'])
+    ocfg = cfg.pop('outputs')
+    _set_unset_returns(cfg['returns'], ocfg['toggles'])
 
     data = read_data(ipath, **icfg)
     results = fit_supervised_model(data, cfg)
@@ -51,23 +49,25 @@ def main(cfg):
     if (fits := results.get('fits')) is not None:
         log.info('Fit results:\n%s', fits.drop(columns='estimator', errors='ignore'))
 
-    # log.info('Saving results')
-    save_results(odir, results)
-    # save_visualizations(results, cfg['visualizations'])
+    _save_results(results, ocfg)
+
+    _save_visualizations(results, ocfg, cfg['visualization'], cfg['pos_label'])
 
 class FitSupervisedModelResults(TypedDict, total=False):
+    y_true              : Series | DataFrame
     fits                : DataFrame
     is_test_data        : DataFrame
     y_pred              : DataFrame
-    feature_importances : Series
+    feature_importances : DataFrame
 
 def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResults:
     # TODO: Split up cfg into kwargs once there is a stable format
-    ocfg = cfg['outputs']
+    cfg_return = cfg['returns']
+    n_outputs = sum(cfg_return.values())
 
     ########################################
     # Checks
-    if not any(ocfg.values()):
+    if not any(cfg_return.values()):
         log.info('All outputs disabled')
 
     ########################################
@@ -77,16 +77,21 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
     random_state = np.random.RandomState(random_gen.bit_generator)
 
     train_test_iterator = build_train_test_iterator(
-        **cfg['train_test_iterator'],
-        train_on_all = cfg['train_on_all'],
-        random_state=random_state,
+        cfg = cfg['train_test_iterator'],
+        random_state = random_state,
     )
+    if cfg['train_on_all']:
+        train_test_iterator = TrainOnAllWrapper(train_test_iterator)
+
     estimator = build_estimator(cfg['estimator'])
 
     ########################################
     log.info('Preprocessing data')
     X, y = preprocess_data(data, **cfg['preprocess'])
     feature_names = X.columns.tolist()
+
+    if cfg_return['return_y_true'] and n_outputs == 1:
+        return {'y_true' : y}
 
     ########################################
     y_pred = None
@@ -101,9 +106,9 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
         # fit_results.update(...)
     else:
         log.info('Running training and testing')
-        save_predictions  = ocfg['save_train_predictions'] or ocfg['save_test_predictions']
-        return_estimators = ocfg['save_estimators'] or ocfg['save_feature_importances'] or save_predictions
-        return_indices    = ocfg['save_indices'] or save_predictions
+        return_predictions  = cfg_return['return_train_predictions'] or cfg_return['return_test_predictions']
+        return_estimators = cfg_return['return_estimators'] or cfg_return['return_feature_importances'] or return_predictions
+        return_indices    = cfg_return['return_indices'] or return_predictions
         # TODO: Implement general train_test function that has the
         # parallelization of cross_validate but allows the user full
         # configuration to, say, save out train predictions and scores
@@ -113,17 +118,17 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
             X,
             y,
             cv                 = train_test_iterator,
-            return_train_score = ocfg['save_train_scores'],
+            return_train_score = cfg_return['return_train_scores'],
             return_estimator   = return_estimators,
             return_indices     = return_indices,
             **cfg['fit'],
         )
 
-        if not ocfg['save_test_scores']:
+        if not cfg_return['return_test_scores']:
             # cross_validate always saves out test scores so for now just delete
             # these if not requested.
             fit_results = {k:v for k,v in fit_results.items() if not k.startswith('test_')}
-            if not ocfg['save_train_scores']:
+            if not cfg_return['return_train_scores']:
                 del fit_results['score_time']
 
         n_splits = len(fit_results['fit_time'])
@@ -136,14 +141,14 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
             split_names = split_names,
         )
 
-        if save_predictions:
+        if return_predictions:
             assert is_test_data is not None
-            save_only_train_pred = not ocfg['save_test_predictions']
-            save_only_test_pred  = not ocfg['save_train_predictions']
+            return_only_train_pred = not cfg_return['return_test_predictions']
+            return_only_test_pred  = not cfg_return['return_train_predictions']
 
-            if save_only_test_pred:
+            if return_only_test_pred:
                 masks = (mask for _, mask in is_test_data.items())
-            elif save_only_train_pred:
+            elif return_only_train_pred:
                 masks = (~mask for _, mask in is_test_data.items())
             else:
                 masks = (mask.notna() for _, mask in is_test_data.items())
@@ -164,7 +169,8 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
                 if check_is_partition(is_notna):
                     y_pred = combine_predictions(y_pred)
 
-    if ocfg['save_feature_importances']:
+    # TODO: Calculate this outside of fit_supervised_model() by returning estimators
+    if cfg_return['return_feature_importances']:
         feature_importances = pd.DataFrame(
             np.column_stack([est.feature_importances_ for est in fit_results['estimator']]),
             index = feature_names,
@@ -177,26 +183,27 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
             sorted_idxs = feature_importances.median(axis=1).sort_values(ascending=False).index
             feature_importances = feature_importances.loc[sorted_idxs]
 
-    if not ocfg['save_estimators'] and 'estimator' in fit_results:
+    if not cfg_return['return_estimators'] and 'estimator' in fit_results:
         # Estimators only returned to get predictions and/or feature importances
         fit_results = fit_results.drop(columns='estimator')
 
-    if not ocfg['save_indices']:
+    if not cfg_return['return_indices']:
         # Indices only returned to get predictions
         is_test_data = None
 
-    if ocfg['save_indices'] and sum(v for k,v in ocfg.items() if k.startswith('save_')) == 1:
-        # Only save_indices. Uncommon use case so not putting in effort to make
+    if cfg_return['return_indices'] and n_outputs == 1:
+        # Only return_indices. Uncommon use case so not putting in effort to make
         # this efficient.
         fit_results = y_pred = feature_importances = None
 
-    results = {k:v for k,v in {
+    results = {
+        'y_true'              : y if cfg_return['return_y_true'] else None,
         'fits'                : fit_results,
         'is_test_data'        : is_test_data,
         'y_pred'              : y_pred,
         'feature_importances' : feature_importances,
-    }.items() if v is not None}
-
+    }
+    results = {k:v for k,v in results.items() if v is not None}
     return FitSupervisedModelResults(**results)
 
 ################################################################################
@@ -257,6 +264,7 @@ def preprocess_data(
     return X, y
 
 def build_estimator(cfg: str | dict) -> BaseEstimator:
+    '''Build sklearn estimators from a yaml compatible dictionary'''
     match cfg:
         case str():
             class_ = cfg
@@ -269,69 +277,127 @@ def build_estimator(cfg: str | dict) -> BaseEstimator:
     return estimator
 
 def build_train_test_iterator(
-    name: str,
-    train_on_all: bool = False,
+    cfg: dict,
     random_state: np.random.RandomState | None = None,
-    **kwargs
 ) -> TrainTestIterable:
+    '''Build sklearn train-test iterators from a yaml compatible dictionary'''
+    name, kwargs = _parse_train_test_iterator_cfg(cfg)
     tt_iter = None
     if name == 'train_test_split':
         tt_iter = import_object('skutils.train_test_iterators.TrainTestSplit')(**kwargs)
     else:
+        if kwargs.get('shuffle') is True:
+            # sklearn iterators raise a ValueError if random_state specified
+            # but shuffle != True
+            kwargs = {**kwargs, 'random_state' : random_state}
         try:
-            if kwargs.get('shuffle') is True:
-                # sklearn iterators raise a ValueError if random_state specified
-                # but shuffle != True
-                kwargs = {**kwargs, 'random_state' : random_state}
             tt_iter = import_object(name)(**kwargs)
         except ImportError:
             pass
     if tt_iter is None:
         raise NotImplementedError(f'name = {name}')
 
-    if train_on_all:
-        tt_iter = TrainOnAllWrapper(tt_iter)
-
     return tt_iter
+
+def _parse_train_test_iterator_cfg(cfg: str | dict[str, dict]) -> tuple[str, dict[str, dict]]:
+    if isinstance(cfg, str):
+        name = cfg
+        kwargs = {}
+    else:
+        name = next(iter(cfg.keys()))
+        kwargs = cfg[name]
+    return name, kwargs
+
 
 def build_model_selector(estimator: BaseEstimator, param_grid: dict = None, **kwargs) -> BaseEstimator:
     return GridSearchCV(estimator, **kwargs)
 
-def save_results(odir: Path, results: FitSupervisedModelResults) -> None:
-    # TODO: Enable saving to different formats (e.g. hdf, parquet, feather, etc.)
-    if (fits := results.get('fits')) is not None:
-        if 'estimator' in fits.columns:
-            estimators = fits['estimator']
-            fits = fits.drop(columns='estimator')
-            (odir / 'models').mkdir()
-            for split, est in estimators.items():
-                opath = odir / f'models/{est.__class__.__name__}_{split}.pkl'
-                # TODO: Enable saving in ONNX format
-                with opath.open('wb') as ofile:
-                    pickle.dump(est, ofile, protocol=pickle.HIGHEST_PROTOCOL)
-                log.info('Estimator saved: %s', opath)
+def _save_results(
+    results: FitSupervisedModelResults,
+    ocfg   : dict,
+) -> None:
+    odir = Path(ocfg['path'])
+    ext_pandas = ocfg['pandas_format']
+    ext_model  = ocfg['model_format']
+    cfg_save = ocfg['toggles']
 
-        opath = odir / 'fits.csv'
-        fits.to_csv(opath)
+    if cfg_save['save_test_scores'] or cfg_save['save_train_scores']:
+        fits = results['fits']
+        opath = odir / 'fits.{ext_pandas}'
+        dump_pandas(fits.drop(columns='estimator', errors='ignore'), opath)
         log.info('Saved fit results: %s', opath)
 
-    if (is_test_data := results.get('is_test_data')) is not None:
-        opath = odir / 'is_test_data.csv'
-        is_test_data.to_csv(opath)
-        log.info('Saved test data per split flags: %s', opath)
+    if cfg_save['save_estimators']:
+        estimators = fits['estimator']
+        odir_models = odir / 'models'
+        odir_models.mkdir()
+        for split, est in estimators.items():
+            opath = odir_models / f'{est.__class__.__name__}_{split}.{ext_model}'
+            dump_model(est, opath)
+            log.info('Estimator saved: %s', opath)
 
-    if (y_pred := results.get('y_pred')) is not None:
-        opath = odir / 'y_pred.csv'
-        y_pred.to_csv(opath)
+    if cfg_save['save_test_predictions'] or cfg_save['save_train_predictions']:
+        opath = odir / f'predictions.{ext_pandas}'
+        dump_pandas(results['y_pred'], opath)
         log.info('Saved predictions: %s', opath)
 
-    if (feature_importances := results.get('feature_importances')) is not None:
-        opath = odir / 'feature_importances.csv'
-        feature_importances.to_csv(opath)
+    if cfg_save['save_indices']:
+        opath = odir / f'is_test_data.{ext_pandas}'
+        dump_pandas(results['is_test_data'], opath)
+        log.info('Saved test data per split flags: %s', opath)
+
+    if cfg_save['save_feature_importances']:
+        opath = odir / f'feature_importances.{ext_pandas}'
+        dump_pandas(results['feature_importances'], opath)
         log.info('Saved feature importances results: %s', opath)
 
-def save_visualizations(results: FitSupervisedModelResults, cfg: dict) -> None:
-    pass
+def _save_visualizations(
+    results: FitSupervisedModelResults,
+    ocfg: dict,
+    cfg: dict,
+    pos_label: Any | None = None
+) -> None:
+    odir         = Path(ocfg['path'])/'visualization'
+    ext          = ocfg['image_format']
+    cfg_save     = ocfg['toggles']
+    y_true       = results['y_true']
+    y_pred       = results['y_pred']
+    is_test_data = results['is_test_data']
+    odir.mkdir()
+
+    # Classifier predict
+    if cfg_save['save_confusion_matrix_plot']:
+        figures = plot.plot_confusion_matrix(y_true, y_pred, is_test_data, cfg['ConfusionMatrixDisplay'])
+        for split, fig in figures.items():
+            opath = odir / f'confusion_matrix_{split}.{ext}'
+            fig.savefig(opath, format=ext)
+            log.info('Confusion matrix plot saved: %s', opath)
+
+    # Classifier prob
+    if cfg_save['save_roc_curve_plot']:
+        figures = plot.plot_roc_curve(y_true, y_pred, is_test_data, pos_label, cfg['RocCurveDisplay'])
+        for split, fig in figures.items():
+            opath = odir / f'roc_curve_{split}.{ext}'
+            fig.savefig(opath, format=ext)
+            log.info('ROC curve plot saved: %s', opath)
+    # if cfg_save['save_det_curve']:
+    #     fig, ax = plot_det_curve()
+    #     metrics.DetCurveDisplay.from_predictions(y_true, y_pred)
+    # if cfg_save['save_precision_recall_curve']:
+    #     fig, ax = plot_precision_recall_curve()
+    #     metrics.PrecisionRecallDisplay.from_predictions(y_true, y_pred)
+    # if cfg_save['save_calibration_plot']:
+    #     calibration.CalibrationDisplay(prob_true, prob_pred, y_prob, estimator_name=estimator_name, pos_label=pos_label)
+
+    # # Regression predict
+    # if cfg_save['save_prediction_error']:
+    #     metrics.PredictionErrorDisplay.from_predictions(y_true, y_pred)
+    # if cfg_save['save_partial_dependence_plot']
+    #     inspection.PartialDependenceDisplay.from_estimator()
+
+    # inspection.DecisionBoundaryDisplay.from_estimator()
+    # model_selection.LearningCurveDisplay.from_estimator()
+    # model_selection.ValidationCurveDisplay.from_estimator()
 
 ################################################################################
 def check_is_partition(df: DataFrame) -> bool:
@@ -473,7 +539,7 @@ def get_config(args: argparse.Namespace):
     default_cfg = get_default_cfg_supervised()
     if args:
         override_cfgs = (yaml.safe_load(Path(p).open()) for p in args.configs)
-        cfg = scripting.merge_config_files(override_cfgs, default_cfg)
+        cfg = scripting.merge_config_files(override_cfgs, default_cfg, al)
     else:
         cfg = default_cfg
     cfg = override_config(cfg, args)
@@ -523,6 +589,55 @@ def validate_config(cfg: dict) -> None:
         )
     if len(messages) > 0:
         raise RuntimeError('Invalid configuration:\n\t- ' + '\n\t- '.join(messages))
+
+def _set_unset_returns(cfg_return: dict[str, bool | None], cfg_save : dict[str, bool]) -> None:
+    '''Automatically determine toggles for fit_supervised_model() return
+    parameters based on the save toggles for fit_supervized_model.py if the
+    return parameters are not set'''
+    any_display_from_predictions = (
+        # All Display visuals that use from_predictions()
+        cfg_save['save_confusion_matrix_plot']
+        or cfg_save['save_roc_curve_plot']
+        or cfg_save['save_det_curve_plot']
+        or cfg_save['save_predicion_recall_curve_plot']
+        or cfg_save['save_calibration_plot']
+        or cfg_save['save_prediction_error_plot']
+    )
+
+    if cfg_return['return_y_true'] is None:
+        cfg_return['return_y_true'] = any_display_from_predictions
+
+    if cfg_return['return_test_scores'] is None:
+        cfg_return['return_test_scores'] = cfg_save['save_test_scores']
+
+    if cfg_return['return_train_scores'] is None:
+        cfg_return['return_train_scores'] = cfg_save['save_train_scores']
+
+    if cfg_return['return_test_predictions'] is None:
+        cfg_return['return_test_predictions'] = (
+            cfg_save['save_test_predictions'] or any_display_from_predictions
+        )
+
+    if cfg_return['return_estimators'] is None:
+        cfg_return['return_estimators'] = (
+            cfg_save['save_estimators']
+            # All Display visuals that use from_estimator()
+            or cfg_save['save_partial_dependence_plot']
+            or cfg_save['save_decision_bounary_plot']
+            or cfg_save['save_learning_curve_plot']
+            or cfg_save['save_validation_curve_plot']
+    )
+
+    if cfg_return['return_train_predictions'] is None:
+        cfg_return['return_train_predictions'] = cfg_save['save_train_predictions']
+
+    if cfg_return['return_indices'] is None:
+        cfg_return['return_indices'] = (
+            cfg_save['save_indices'] or any_display_from_predictions
+        )
+
+    if cfg_return['return_feature_importances'] is None:
+        cfg_return['return_feature_importances'] = cfg_save['save_feature_importances']
 
 # Accessed through run_skutils:main
 # if __name__ == '__main__':

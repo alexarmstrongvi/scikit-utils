@@ -98,10 +98,10 @@ def update_config(
                 raise KeyError(f"{key!r} not in original dictionary")
             original[key] = val
         elif isinstance(val, dict):
-            if original[key] is None:
-                original[key] = update_config({}, val, copy, allow_new_keys=True)
-            else:
+            if isinstance(original[key], dict):
                 original[key] = update_config(original[key], val, copy, allow_new_keys)
+            else:
+                original[key] = update_config({}, val, copy, allow_new_keys=True)
         elif isinstance(val, list):
             original_list = original[key] or []
             if overwrite_lists:

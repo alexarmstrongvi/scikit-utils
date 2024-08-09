@@ -6,16 +6,20 @@ import logging
 # 3rd party
 import numpy as np
 import pandas as pd
-import pytest
 from sklearn.datasets import make_classification, make_regression
 from sklearn.ensemble import ExtraTreesClassifier, ExtraTreesRegressor
 
 # 1st party
-from skutils.bin.fit_supervised_model import fit_supervised_model, predict
+from skutils.bin.fit_supervised_model import (
+    _set_unset_returns,
+    fit_supervised_model,
+    predict
+)
 from skutils.data import get_default_cfg_supervised
 
 logging.getLogger('asyncio').setLevel('WARNING')
 
+################################################################################
 def test_fit_supervised_model():
     X, y = make_classification(
         n_samples            = 100,
@@ -32,6 +36,9 @@ def test_fit_supervised_model():
         columns = [f'Feature {i}' for i in range(X.shape[1])],
     ).assign(target=y)
     cfg = get_default_cfg_supervised()
+    del cfg['input']
+    ocfg = cfg.pop('outputs')
+    _set_unset_returns(cfg['returns'], ocfg['toggles'])
 
     cfg['estimator'] = 'ExtraTreesClassifier'
     cfg['fit']['scoring'] = ['accuracy']
@@ -46,7 +53,7 @@ def test_fit_supervised_model():
     # Test simple cross validation
     cfg_mod = copy.deepcopy(cfg)
     #TODO: cfg = get_example_cfg('KFold')
-    cfg_mod['train_test_iterator'] = {'name' : 'KFold'}
+    cfg_mod['train_test_iterator'] = 'KFold'
     results = fit_supervised_model(data, cfg_mod)
     assert results['fits'].index.to_list() == [0,1,2,3,4]
     assert results['fits'].columns.to_list() == ['fit_time', 'score_time', 'test_accuracy']
@@ -54,75 +61,68 @@ def test_fit_supervised_model():
     ########################################
     # Test no output enabled
     cfg_mod_no_out = copy.deepcopy(cfg)
-    cfg_mod_no_out['train_test_iterator'] = {'name' : 'KFold'}
-    cfg_mod_no_out['outputs'] = {k : False for k in cfg_mod['outputs']}
+    cfg_mod_no_out['train_test_iterator'] = 'KFold'
+    cfg_mod_no_out['returns'] = {k : False for k in cfg_mod['returns']}
     results = fit_supervised_model(data, cfg_mod_no_out)
     assert results['fits'].index.to_list() == [0,1,2,3,4]
     assert results['fits'].columns.to_list() == ['fit_time']
     assert results['fits'].notna().all().all()
 
     # Test single output enabled
-    skip_params = {
-        # These do not toggle fit outputs
-        'path',
-        'timestamp_subdir',
-        'overwrite',
-        'save_input_configs',
-        'save_final_config',
-        'save_git_diff',
-    }
-    for save_key in cfg['outputs']:
-        if save_key in skip_params:
-            continue
+    for return_key in cfg['returns']:
         cfg_mod = copy.deepcopy(cfg_mod_no_out)
-        cfg_mod['outputs'][save_key] = True
+        cfg_mod['returns'][return_key] = True
         results = fit_supervised_model(data, cfg_mod)
 
         results_keys = list(results.keys())
         if 'fits' in results:
             fits_columns = results['fits'].columns.to_list()
             split_names = results['fits'].index
+            pd.testing.assert_index_equal(split_names, pd.Index([0,1,2,3,4], name='split'))
         elif 'is_test_data' in results:
             split_names = results['is_test_data'].columns
-        pd.testing.assert_index_equal(split_names, pd.Index([0,1,2,3,4], name='split'))
+            pd.testing.assert_index_equal(split_names, pd.Index([0,1,2,3,4], name='split'))
 
-        if save_key == 'save_test_scores':
+        if return_key == 'return_y_true':
+            assert results_keys == ['y_true']
+            pd.testing.assert_series_equal(results['y_true'], data['target'], check_names=False)
+        elif return_key == 'return_test_scores':
             assert results_keys == ['fits']
             assert fits_columns == ['fit_time', 'score_time', 'test_accuracy']
             _test_fits(results['fits'])
-        elif save_key == 'save_train_scores':
+        elif return_key == 'return_train_scores':
             assert results_keys == ['fits']
             assert fits_columns == ['fit_time', 'score_time', 'train_accuracy']
             _test_fits(results['fits'])
-        elif save_key == 'save_estimators':
+        elif return_key == 'return_estimators':
             assert results_keys == ['fits']
             assert fits_columns == ['fit_time', 'estimator']
             _test_fits(results['fits'])
-        elif save_key == 'save_test_predictions':
+        elif return_key == 'return_test_predictions':
             assert results_keys == ['fits', 'y_pred']
             assert fits_columns == ['fit_time']
             _test_fits(results['fits'])
             _test_y_pred(results['y_pred'], split_names)
-        elif save_key == 'save_train_predictions':
+        elif return_key == 'return_train_predictions':
             assert results_keys == ['fits', 'y_pred']
             assert fits_columns == ['fit_time']
             _test_fits(results['fits'])
             _test_y_pred(results['y_pred'], split_names)
-        elif save_key == 'save_indices':
+        elif return_key == 'return_indices':
             assert results_keys == ['is_test_data']
             _test_is_test_data(results['is_test_data'], split_names)
-        elif save_key == 'save_feature_importances':
+        elif return_key == 'return_feature_importances':
             assert results_keys == ['fits', 'feature_importances']
             assert fits_columns == ['fit_time']
             _test_fits(results['fits'])
             _test_feature_importances(results['feature_importances'], split_names)
         else:
-            assert False, f'No test for save cfg: {save_key}'
+            assert False, f'No test for return cfg: {return_key}'
 
     # Test all outputs and options enabled
     cfg_mod = copy.deepcopy(cfg)
-    cfg_mod['train_test_iterator'] = {'name' : 'KFold'}
-    cfg_mod['outputs'] = {k : True for k in cfg_mod['outputs']}
+    cfg_mod['train_test_iterator'] = 'KFold'
+    cfg_mod['returns'] = {k : True for k in cfg_mod['returns']}
     cfg_mod['train_on_all'] = True
     results = fit_supervised_model(data, cfg_mod)
 
@@ -146,7 +146,7 @@ def test_fit_supervised_model():
 
     ########################################
     cfg_mod = copy.deepcopy(cfg)
-    cfg_mod['outputs']['save_test_predictions'] = True
+    cfg_mod['returns']['return_test_predictions'] = True
 
     # Test 1a: Binary classifier with boolean target
     results = fit_supervised_model(data.astype({'target' : bool}), cfg_mod)
@@ -173,6 +173,9 @@ def test_fit_supervised_model():
 
 def test_fit_supervised_model_regression():
     cfg = get_default_cfg_supervised()
+    del cfg['input']
+    ocfg = cfg.pop('outputs')
+    _set_unset_returns(cfg['returns'], ocfg['toggles'])
     cfg['estimator'] = 'ExtraTreesRegressor'
 
     # Test regression
@@ -188,8 +191,8 @@ def test_fit_supervised_model_regression():
     ).assign(target=y)
 
     cfg_mod = copy.deepcopy(cfg)
-    cfg_mod['train_test_iterator'] = {'name' : 'KFold'}
-    cfg_mod['outputs'] = {k : True for k in cfg_mod['outputs']}
+    cfg_mod['train_test_iterator'] = 'KFold'
+    cfg_mod['returns'] = {k : True for k in cfg_mod['returns']}
     cfg_mod['train_on_all'] = True
     results = fit_supervised_model(data, cfg_mod)
 

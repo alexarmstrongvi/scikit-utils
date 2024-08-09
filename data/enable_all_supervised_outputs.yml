@@ -1,13 +1,14 @@
 # NOTE: This needs to be manually kept in sync with fit_supervised_model.yml to
 # include all possible toggles.
 outputs:
-    save_input_configs       : true
-    save_final_config        : true
-    save_git_diff            : true
-    save_test_scores         : true
-    save_train_scores        : true
-    save_estimators          : true
-    save_test_predictions    : true
-    save_train_predictions   : true
-    save_indices             : true
-    save_feature_importances : true
+    toggles:
+        save_input_configs       : true
+        save_final_config        : true
+        save_git_diff            : true
+        save_test_scores         : true
+        save_train_scores        : true
+        save_estimators          : true
+        save_test_predictions    : true
+        save_train_predictions   : true
+        save_indices             : true
+        save_feature_importances : true

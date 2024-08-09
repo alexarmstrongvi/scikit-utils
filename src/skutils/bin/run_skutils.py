@@ -27,6 +27,7 @@ def main():
 
     ocfg = cfg['outputs']
     odir = Path(ocfg['path'])
+    cfg_save = ocfg['toggles']
 
     # Setup
     if ocfg["timestamp_subdir"]:
@@ -40,20 +41,20 @@ def main():
 
     # Reproducibility
     log.debug("Final configuration:\n%s", pprint.pformat(cfg, indent=4))
-    if ocfg['save_input_configs']:
+    if cfg_save['save_input_configs']:
         buf = len(args.configs)
         for i, path in enumerate(args.configs):
             opath = odir / f'config_input{i:0{buf}d}_{Path(path).stem}.yml'
             shutil.copyfile(path, opath)
             log.info("Input configuration saved: %s", opath)
-    if ocfg['save_final_config']:
+    if cfg_save['save_final_config']:
         opath = odir / "config.yml"
         yaml.safe_dump(cfg, opath.open("w"))
         log.info("Final configuration saved: %s", opath)
 
     if (working_dir := git.find_working_dir(Path(__file__))) is not None:
         log.debug("Version Control Summary:\n%s", git.summarize_version_control(working_dir))
-        if ocfg['save_git_diff']:
+        if cfg_save['save_git_diff']:
             opath = odir / "git_diff.patch"
             opath.write_text(git.get_diff(working_dir))
             log.info("Git diff patch saved: %s", opath)
