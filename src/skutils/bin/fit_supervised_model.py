@@ -185,7 +185,7 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
 
     if not cfg_return['return_estimators'] and 'estimator' in fit_results:
         # Estimators only returned to get predictions and/or feature importances
-        fit_results = fit_results.drop(columns='estimator')
+        fit_results = fit_results.drop(columns='estimator', errors='ignore')
 
     if not cfg_return['return_indices']:
         # Indices only returned to get predictions
@@ -212,9 +212,9 @@ def read_data(path: Path, **kwargs) -> DataFrame:
         data = pd.read_csv(path, **kwargs)
     elif path.suffix in ('.hdf', '.hdf5'):
         data = pd.read_hdf(path, **kwargs)
-    elif path.suffix in ('.parquet'):
+    elif path.suffix == '.parquet':
         data = pd.read_parquet(path, **kwargs)
-    elif path.suffix in ('.feather'):
+    elif path.suffix == '.feather':
         data = pd.read_feather(path, **kwargs)
     else:
         raise NotImplementedError(
@@ -237,8 +237,6 @@ def preprocess_data(
     missing data) in order to avoid data leakage. Such transformations should be
     part of the estimator pipeline created in build_estimator
     '''
-    if target_map is not None:
-        data[target] = data[target].map(target_map)
 
     if astype is not None:
         data = data.astype(astype)
@@ -260,6 +258,9 @@ def preprocess_data(
     # TODO: Save any columns not in features or target to metadata and return?
     X = data[features]
     y = data[target]
+
+    if target_map is not None:
+        y = y.map(target_map)
 
     return X, y
 
@@ -539,7 +540,7 @@ def get_config(args: argparse.Namespace):
     default_cfg = get_default_cfg_supervised()
     if args:
         override_cfgs = (yaml.safe_load(Path(p).open()) for p in args.configs)
-        cfg = scripting.merge_config_files(override_cfgs, default_cfg, al)
+        cfg = scripting.merge_config_files(override_cfgs, default_cfg)
     else:
         cfg = default_cfg
     cfg = override_config(cfg, args)

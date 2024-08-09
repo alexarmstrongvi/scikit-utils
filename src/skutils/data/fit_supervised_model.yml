@@ -8,7 +8,7 @@ outputs:
     path : null
     # Save all outputs in a timestamped subdirectory of `path`
     timestamp_subdir : false
-    # Overwrite output directory if it exists. Otherwise, ask user for input.
+    # Overwrite output directory if it exists. Otherwise, ask user.
     overwrite : false
     # Format in which to save models to disk
     # Choices: pkl, joblib, dill, cloudpickle, skops, onnx
@@ -54,11 +54,11 @@ outputs:
 random_seed: 0
 
 preprocess:
+    astype     : null   # df = df.astype(astype)
+    index      : null   # df = df.set_index(index)
     features   : null   # X = df[features]
     target     : target # y = df[target]
-    index      : null   # df.set_index(index)
-    target_map : null   # df[target] = df[target].map(target_map)
-    astype     : null   # df = df.astype(astype)
+    target_map : null   # y = y.map(target_map)
 
 # Value of target column to treat as positive class (only for classification)
 pos_label : null
@@ -71,7 +71,7 @@ train_on_all : false
 
 # Names for splits used in DataFrame columns. 'null' results in simple
 # enumeration.
-split_names: null
+split_names: 'split{}'
 
 # Collapse predictions for each split into a single column (a.k.a.
 # pd.DataFrame.stack) if possible. The common use case would be stacking

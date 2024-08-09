@@ -15,8 +15,7 @@ outputs:
         save_confusion_matrix_plot : true
         save_roc_curve_plot : true
 
-train_test_iterator:
-    name: KFold
+train_test_iterator: KFold
 
 # train_on_all : True
 

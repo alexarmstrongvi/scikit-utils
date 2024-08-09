@@ -47,7 +47,10 @@ def test_fit_supervised_model():
     # Test default train-test evaluation
     results = fit_supervised_model(data, cfg)
     assert list(results.keys()) == ['fits']
-    assert results['fits'].index.to_list() == [0]
+    pd.testing.assert_index_equal(
+        results['fits'].index,
+        pd.Index(['split0'], name='split')
+    )
     assert results['fits'].columns.to_list() == ['fit_time', 'score_time', 'test_accuracy']
 
     # Test simple cross validation
@@ -55,7 +58,10 @@ def test_fit_supervised_model():
     #TODO: cfg = get_example_cfg('KFold')
     cfg_mod['train_test_iterator'] = 'KFold'
     results = fit_supervised_model(data, cfg_mod)
-    assert results['fits'].index.to_list() == [0,1,2,3,4]
+    pd.testing.assert_index_equal(
+        results['fits'].index,
+        pd.Index(['split0','split1','split2','split3','split4'], name='split')
+    )
     assert results['fits'].columns.to_list() == ['fit_time', 'score_time', 'test_accuracy']
 
     ########################################
@@ -64,7 +70,11 @@ def test_fit_supervised_model():
     cfg_mod_no_out['train_test_iterator'] = 'KFold'
     cfg_mod_no_out['returns'] = {k : False for k in cfg_mod['returns']}
     results = fit_supervised_model(data, cfg_mod_no_out)
-    assert results['fits'].index.to_list() == [0,1,2,3,4]
+    # assert results['fits'].index.to_list() == ['split0','split1','split2','split3','split4']
+    pd.testing.assert_index_equal(
+        results['fits'].index,
+        pd.Index(['split0','split1','split2','split3','split4'], name='split')
+    )
     assert results['fits'].columns.to_list() == ['fit_time']
     assert results['fits'].notna().all().all()
 
@@ -78,10 +88,16 @@ def test_fit_supervised_model():
         if 'fits' in results:
             fits_columns = results['fits'].columns.to_list()
             split_names = results['fits'].index
-            pd.testing.assert_index_equal(split_names, pd.Index([0,1,2,3,4], name='split'))
+            pd.testing.assert_index_equal(
+                split_names,
+                pd.Index(['split0','split1','split2','split3','split4'], name='split')
+            )
         elif 'is_test_data' in results:
             split_names = results['is_test_data'].columns
-            pd.testing.assert_index_equal(split_names, pd.Index([0,1,2,3,4], name='split'))
+            pd.testing.assert_index_equal(
+                split_names,
+                pd.Index(['split0','split1','split2','split3','split4'], name='split')
+            )
 
         if return_key == 'return_y_true':
             assert results_keys == ['y_true']
