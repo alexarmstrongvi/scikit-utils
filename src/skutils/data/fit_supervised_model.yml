@@ -65,6 +65,13 @@ pos_label : null
 
 model_selector: null
 
+# Configure the iteration over train-test folds.
+# Option 1) Scikit-learn cross validator with all defaults
+# train_test_iterator : KFold
+# Option 2) Scikit-learn cross validator with keyword arguments
+# train_test_iterator :
+#     KFold:
+#         n_splits: 10
 train_test_iterator : train_test_split
 
 train_on_all : false
@@ -86,12 +93,8 @@ stack_split_predictions: true
 # TODO: Allow user to specify multiple estimators as a list or even "all Classifiers"
 estimator: null
 
-fit:
-    # return_* keywords determined by save_* parameters in outputs section so no
-    # need to manually set them here
-    scoring: null
-    # - accuracy
-    # - neg_log_loss
+# Keyword arguments for model_selection.cross_validate
+fit: null
 
 visualization:
     # Classifier predict

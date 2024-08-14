@@ -1,22 +1,36 @@
 outputs:
-    pandas_format : csv
-    image_format: jpg
+    pandas_format: csv
     toggles:
-        save_input_configs       : false
         save_final_config        : true
-        save_git_diff            : false
-        save_test_scores         : false
-        save_train_scores        : false
-        save_estimators          : false
-        save_test_predictions    : false
-        save_train_predictions   : false
-        save_indices             : false
-        save_feature_importances : false
+        save_test_scores         : true
+        save_estimators          : true
+        save_test_predictions    : true
+        save_indices             : true
+        save_feature_importances : true
+        # Visualization
         save_confusion_matrix_plot : true
-        save_roc_curve_plot : true
+        save_roc_curve_plot        : true
 
-train_test_iterator: KFold
+train_test_iterator:
+    StratifiedKFold:
+        n_splits: 4
+        shuffle: True
 
-# train_on_all : True
+estimator:
+    make_pipeline:
+        steps:
+            - StandardScaler
+            - [ExtraTreesClassifier, {
+                n_estimators: 10
+            }]
 
-estimator: ExtraTreesClassifier
+fit:
+    scoring:
+        - accuracy
+        - f1
+        - roc_auc
+    n_jobs: 2
+    verbose: 3
+
+logging:
+    level: DEBUG

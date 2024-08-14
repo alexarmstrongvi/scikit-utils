@@ -51,7 +51,8 @@ def main(cfg):
 
     _save_results(results, ocfg)
 
-    _save_visualizations(results, ocfg, cfg['visualization'], cfg['pos_label'])
+    if any(v for k,v in ocfg['toggles'].items() if k.endswith('plot')):
+        _save_visualizations(results, ocfg, cfg['visualization'], cfg['pos_label'])
 
 class FitSupervisedModelResults(TypedDict, total=False):
     y_true              : Series | DataFrame
@@ -121,7 +122,7 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
             return_train_score = cfg_return['return_train_scores'],
             return_estimator   = return_estimators,
             return_indices     = return_indices,
-            **cfg['fit'],
+            **(cfg['fit'] or {}),
         )
 
         if not cfg_return['return_test_scores']:
@@ -171,8 +172,13 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
 
     # TODO: Calculate this outside of fit_supervised_model() by returning estimators
     if cfg_return['return_feature_importances']:
+        feature_importances = []
+        for est in fit_results['estimator']:
+            if hasattr(est, 'steps'): # It's a Pipeline:
+                est = est.steps[-1][1]
+            feature_importances.append(est.feature_importances_)
         feature_importances = pd.DataFrame(
-            np.column_stack([est.feature_importances_ for est in fit_results['estimator']]),
+            np.column_stack(feature_importances),
             index = feature_names,
             columns = fit_results.index,
         )
