@@ -22,6 +22,8 @@ outputs:
     # Format in which to save plots
     # Choices: see matplotlib.Figure.savefig
     image_format : png # Any format that can passed to matplotlib Figure.savefig
+    # Save metrics and visuals as tensorboard log
+    tensorboard : false
     # Toggles for which outputs to save
     toggles:
         # Reproducibility
@@ -127,6 +129,7 @@ visualization:
 # Toggle what gets returned by fit_supervised_model()
 # null -> determine automatically based on outputs to be saved
 returns:
+    return_X                   : null
     return_y_true              : null
     return_test_scores         : null
     return_train_scores        : null

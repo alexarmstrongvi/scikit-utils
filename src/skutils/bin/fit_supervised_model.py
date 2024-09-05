@@ -16,6 +16,7 @@ import pandas as pd
 from pandas import DataFrame, Series
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import GridSearchCV, cross_validate
+from tensorboardX import SummaryWriter
 import yaml
 
 # 1st party
@@ -51,10 +52,18 @@ def main(cfg):
 
     _save_results(results, ocfg)
 
-    if any(v for k,v in ocfg['toggles'].items() if k.endswith('plot')):
-        _save_visualizations(results, ocfg, cfg['visualization'], cfg['pos_label'])
+    if _any_plots_enabled(ocfg):
+        random_state = np.random.RandomState(cfg['random_seed'])
+        _save_visualizations(
+            results,
+            ocfg         = ocfg,
+            cfg          = cfg['visualization'],
+            pos_label    = cfg['pos_label'],
+            random_state = random_state,
+        )
 
 class FitSupervisedModelResults(TypedDict, total=False):
+    X                   : DataFrame
     y_true              : Series | DataFrame
     fits                : DataFrame
     is_test_data        : DataFrame
@@ -181,7 +190,7 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
             np.column_stack(feature_importances),
             index = feature_names,
             columns = fit_results.index,
-        )
+        ).rename_axis(index='Feature')
         # Sort features
         if 'all' in feature_importances:
             feature_importances = feature_importances.sort_values('all', ascending=False)
@@ -203,10 +212,11 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
         fit_results = y_pred = feature_importances = None
 
     results = {
-        'y_true'              : y if cfg_return['return_y_true'] else None,
-        'fits'                : fit_results,
-        'is_test_data'        : is_test_data,
-        'y_pred'              : y_pred,
+        'X'            : X if cfg_return['return_X'] else None,
+        'y_true'       : y if cfg_return['return_y_true'] else None,
+        'fits'         : fit_results,
+        'is_test_data' : is_test_data,
+        'y_pred'       : y_pred,
         'feature_importances' : feature_importances,
     }
     results = {k:v for k,v in results.items() if v is not None}
@@ -304,6 +314,9 @@ def _parse_train_test_iterator_cfg(cfg: str | dict[str, dict]) -> tuple[str, dic
 def build_model_selector(estimator: BaseEstimator, param_grid: dict = None, **kwargs) -> BaseEstimator:
     return GridSearchCV(estimator, **kwargs)
 
+def _any_plots_enabled(ocfg: dict) -> bool:
+    return any(v for k,v in ocfg['toggles'].items() if k.endswith('plot'))
+
 def _save_results(
     results: FitSupervisedModelResults,
     ocfg   : dict,
@@ -312,6 +325,11 @@ def _save_results(
     ext_pandas = ocfg['pandas_format']
     ext_model  = ocfg['model_format']
     cfg_save = ocfg['toggles']
+
+    # TODO: Enable saving results with Tensorboard
+    tb_writer = None
+    if ocfg['tensorboard']:
+        tb_writer = SummaryWriter(logdir=ocfg['path'])
 
     if cfg_save['save_test_scores'] or cfg_save['save_train_scores']:
         fits = results['fits']
@@ -343,53 +361,96 @@ def _save_results(
         dump_pandas(results['feature_importances'], opath)
         log.info('Saved feature importances results: %s', opath)
 
+    if tb_writer is not None:
+        tb_writer.close()
+
 def _save_visualizations(
     results: FitSupervisedModelResults,
     ocfg: dict,
     cfg: dict,
-    pos_label: Any | None = None
+    pos_label: Any | None,
+    random_state: np.random.RandomState,
 ) -> None:
-    odir         = Path(ocfg['path'])/'visualization'
     ext          = ocfg['image_format']
     cfg_save     = ocfg['toggles']
-    y_true       = results['y_true']
-    y_pred       = results['y_pred']
-    is_test_data = results['is_test_data']
-    odir.mkdir()
+    if ocfg['tensorboard']:
+        tb_writer = SummaryWriter(logdir=Path(ocfg['path'], 'tensorboard'))
+    else:
+        tb_writer = None
+        odir = Path(ocfg['path'])/'visualization'
+        odir.mkdir()
 
     # Classifier predict
     if cfg_save['save_confusion_matrix_plot']:
-        figures = plot.plot_confusion_matrix(y_true, y_pred, is_test_data, cfg['ConfusionMatrixDisplay'])
-        for split, fig in figures.items():
-            opath = odir / f'confusion_matrix_{split}.{ext}'
-            fig.savefig(opath, format=ext)
-            log.info('Confusion matrix plot saved: %s', opath)
+        figures = plot.plot_confusion_matrix(
+            results['y_true'],
+            results['y_pred'],
+            results['is_test_data'],
+            cfg['ConfusionMatrixDisplay']
+        )
+        for split, fig in figures:
+            if ocfg['tensorboard']:
+                tag = f"confusion_matrix/{split}"
+                tb_writer.add_figure(tag, fig)
+                log.info('Confusion matrix logged to tensorboard: %s', tag)
+            else:
+                opath = odir / f'confusion_matrix_{split}.{ext}'
+                fig.savefig(opath, format=ext)
+                log.info('Confusion matrix plot saved: %s', opath)
 
     # Classifier prob
     if cfg_save['save_roc_curve_plot']:
-        figures = plot.plot_roc_curve(y_true, y_pred, is_test_data, pos_label, cfg['RocCurveDisplay'])
+        figures = plot.plot_roc_curve(
+            results['y_true'],
+            results['y_pred'],
+            results['is_test_data'],
+            pos_label,
+            cfg['RocCurveDisplay']
+        )
         for split, fig in figures.items():
-            opath = odir / f'roc_curve_{split}.{ext}'
-            fig.savefig(opath, format=ext)
-            log.info('ROC curve plot saved: %s', opath)
+            if ocfg['tensorboard']:
+                tag = f"roc_curve/{split}"
+                tb_writer.add_figure(tag, fig)
+                log.info('ROC curve logged to tensorboard: %s', tag)
+            else:
+                opath = odir / f'roc_curve_{split}.{ext}'
+                fig.savefig(opath, format=ext)
+                log.info('ROC curve plot saved: %s', opath)
     # if cfg_save['save_det_curve']:
     #     fig, ax = plot_det_curve()
-    #     metrics.DetCurveDisplay.from_predictions(y_true, y_pred)
+    #     metrics.DetCurveDisplay.from_predictions(results['y_true'], results['y_pred'])
     # if cfg_save['save_precision_recall_curve']:
     #     fig, ax = plot_precision_recall_curve()
-    #     metrics.PrecisionRecallDisplay.from_predictions(y_true, y_pred)
+    #     metrics.PrecisionRecallDisplay.from_predictions(results['y_true'], results['y_pred'])
     # if cfg_save['save_calibration_plot']:
     #     calibration.CalibrationDisplay(prob_true, prob_pred, y_prob, estimator_name=estimator_name, pos_label=pos_label)
 
     # # Regression predict
     # if cfg_save['save_prediction_error']:
-    #     metrics.PredictionErrorDisplay.from_predictions(y_true, y_pred)
-    # if cfg_save['save_partial_dependence_plot']
-    #     inspection.PartialDependenceDisplay.from_estimator()
+    #     metrics.PredictionErrorDisplay.from_predictions(results['y_true'], results['y_pred'])
+    if cfg_save['save_partial_dependence_plot']:
+        figures = plot.plot_partial_dependence(
+            estimators = results['fits']['estimator'],
+            X = results['X'],
+            cfg = cfg['PartialDependenceDisplay'] or {},
+            random_state=random_state,
+        )
+        for split, fig in figures:
+            if ocfg['tensorboard']:
+                tag = f"partial_dependence/{split}"
+                tb_writer.add_figure(tag, fig)
+                log.info('Partial dependence plot logged to tensorboard: %s', tag)
+            else:
+                opath = odir / f'partial_dependence_{split}.{ext}'
+                fig.savefig(opath, format=ext)
+                log.info('Partial dependence plot saved: %s', opath)
 
     # inspection.DecisionBoundaryDisplay.from_estimator()
     # model_selection.LearningCurveDisplay.from_estimator()
     # model_selection.ValidationCurveDisplay.from_estimator()
+
+    if ocfg['tensorboard']:
+        tb_writer.close()
 
 ################################################################################
 def check_is_partition(df: DataFrame) -> bool:
@@ -595,6 +656,16 @@ def _set_unset_returns(cfg_return: dict[str, bool | None], cfg_save : dict[str, 
         or cfg_save['save_calibration_plot']
         or cfg_save['save_prediction_error_plot']
     )
+    any_display_from_estimators = (
+        # All Display visuals that use from_estimator()
+        cfg_save['save_partial_dependence_plot']
+        or cfg_save['save_decision_bounary_plot']
+        or cfg_save['save_learning_curve_plot']
+        or cfg_save['save_validation_curve_plot']
+)
+
+    if cfg_return['return_X'] is None:
+        cfg_return['return_X'] = any_display_from_estimators
 
     if cfg_return['return_y_true'] is None:
         cfg_return['return_y_true'] = any_display_from_predictions
@@ -613,12 +684,8 @@ def _set_unset_returns(cfg_return: dict[str, bool | None], cfg_save : dict[str, 
     if cfg_return['return_estimators'] is None:
         cfg_return['return_estimators'] = (
             cfg_save['save_estimators']
-            # All Display visuals that use from_estimator()
-            or cfg_save['save_partial_dependence_plot']
-            or cfg_save['save_decision_bounary_plot']
-            or cfg_save['save_learning_curve_plot']
-            or cfg_save['save_validation_curve_plot']
-    )
+            or any_display_from_estimators
+        )
 
     if cfg_return['return_train_predictions'] is None:
         cfg_return['return_train_predictions'] = cfg_save['save_train_predictions']

@@ -11,7 +11,9 @@ dependencies = [
     "seaborn",
     "shapely",  # Used in roc.py
     "pyarrow",
-    "pyyaml"
+    "pyyaml",
+    "tensorboard",
+    "tensorboardX",
 ]
 
 [project.optional-dependencies]
