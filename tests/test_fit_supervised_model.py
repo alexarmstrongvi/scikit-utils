@@ -10,12 +10,9 @@ from sklearn.datasets import make_classification, make_regression
 from sklearn.ensemble import ExtraTreesClassifier, ExtraTreesRegressor
 
 # 1st party
-from skutils.bin.fit_supervised_model import (
-    _set_unset_returns,
-    fit_supervised_model,
-    predict
-)
+from skutils.bin.fit_supervised_model import set_unset_returns
 from skutils.data import get_default_cfg_supervised
+from skutils.fit_supervised_model import fit_supervised_model, predict
 
 logging.getLogger('asyncio').setLevel('WARNING')
 
@@ -38,10 +35,10 @@ def test_fit_supervised_model():
     cfg = get_default_cfg_supervised()
     del cfg['input']
     ocfg = cfg.pop('outputs')
-    _set_unset_returns(cfg['returns'], ocfg['toggles'])
+    set_unset_returns(cfg['returns'], ocfg['toggles'])
 
     cfg['estimator'] = 'ExtraTreesClassifier'
-    cfg['fit']['scoring'] = ['accuracy']
+    cfg['fit'] = {'scoring' : ['accuracy']}
 
     ########################################
     # Test default train-test evaluation
@@ -99,7 +96,10 @@ def test_fit_supervised_model():
                 pd.Index(['split0','split1','split2','split3','split4'], name='split')
             )
 
-        if return_key == 'return_y_true':
+        if return_key == 'return_X':
+            assert results_keys == ['X']
+            pd.testing.assert_frame_equal(results['X'], data.drop(columns='target'), check_names=False)
+        elif return_key == 'return_y_true':
             assert results_keys == ['y_true']
             pd.testing.assert_series_equal(results['y_true'], data['target'], check_names=False)
         elif return_key == 'return_test_scores':
@@ -191,7 +191,7 @@ def test_fit_supervised_model_regression():
     cfg = get_default_cfg_supervised()
     del cfg['input']
     ocfg = cfg.pop('outputs')
-    _set_unset_returns(cfg['returns'], ocfg['toggles'])
+    set_unset_returns(cfg['returns'], ocfg['toggles'])
     cfg['estimator'] = 'ExtraTreesRegressor'
 
     # Test regression
