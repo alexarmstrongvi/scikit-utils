@@ -10,7 +10,7 @@ from sklearn.datasets import make_classification, make_regression
 from sklearn.ensemble import ExtraTreesClassifier, ExtraTreesRegressor
 
 # 1st party
-from skutils.bin.fit_supervised_model import set_unset_returns
+from skutils.bin.run_fit_supervised_model import set_unset_returns
 from skutils.data import get_default_cfg_supervised
 from skutils.fit_supervised_model import fit_supervised_model, predict
 

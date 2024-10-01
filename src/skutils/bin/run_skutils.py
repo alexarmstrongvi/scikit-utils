@@ -12,7 +12,7 @@ import yaml
 
 # 1st party
 from skutils import git, logging_utils, scripting
-from skutils.bin import fit_supervised_model
+from skutils.bin import run_fit_supervised_model
 
 # Globals
 log = logging.getLogger(Path(__file__).stem)
@@ -81,10 +81,10 @@ def parse_argv():
         name = 'run',
         help = 'Run supervised learning end-to-end'
     )
-    fit_supervised_model.add_arguments(run, start_stage="run")
+    run_fit_supervised_model.add_arguments(run, start_stage="run")
     run.set_defaults(
-        main = fit_supervised_model.main,
-        get_config = fit_supervised_model.get_config,
+        main = run_fit_supervised_model.main,
+        get_config = run_fit_supervised_model.get_config,
     )
 
     ########################################
@@ -93,10 +93,10 @@ def parse_argv():
         name = 'score',
         help = '(TODO) Run only scoring stage'
     )
-    fit_supervised_model.add_arguments(score, start_stage="score")
+    run_fit_supervised_model.add_arguments(score, start_stage="score")
     score.set_defaults(
-        main = fit_supervised_model.main,
-        get_config = fit_supervised_model.get_config,
+        main = run_fit_supervised_model.main,
+        get_config = run_fit_supervised_model.get_config,
     )
 
     ########################################
@@ -105,10 +105,10 @@ def parse_argv():
         name = 'visualize',
         help = '(TODO) Run only visualization stage'
     )
-    fit_supervised_model.add_arguments(visualize, start_stage="visualize")
+    run_fit_supervised_model.add_arguments(visualize, start_stage="visualize")
     visualize.set_defaults(
-        main = fit_supervised_model.main,
-        get_config = fit_supervised_model.get_config,
+        main = run_fit_supervised_model.main,
+        get_config = run_fit_supervised_model.get_config,
     )
 
     ################################################################################
