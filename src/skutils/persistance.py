@@ -68,6 +68,43 @@ def dump_model(
             f'Choose from the following: pkl, joblib, dill, cloudpickle, skops, onnx',
         )
 
+def load_model(opath: Path) -> BaseEstimator | None:
+    '''Load model from disk in one of several supported formats'''
+    # NOTE: Importing 3rd party libraries only if necessary
+    model = None
+    suffix = opath.suffix
+    if suffix == '.pkl':
+        with opath.open('rb') as ofile:
+            model = pickle.load(ofile)
+    elif suffix == '.joblib':
+        # 3rd party
+        import joblib
+        with opath.open('rb') as ofile:
+            model = joblib.load(ofile)
+    elif suffix == '.dill':
+        # 3rd party
+        import dill
+        raise NotImplementedError()
+    elif suffix == '.cloudpickle':
+        # 3rd party
+        import cloudpickle
+        raise NotImplementedError()
+    elif suffix == '.skops':
+        # 3rd party
+        import skops.io as sio
+        raise NotImplementedError()
+    elif suffix == '.onnx':
+        # 3rd party
+        from skl2onnx import to_onnx
+        raise NotImplementedError()
+    else:
+        raise ValueError(
+            f'Unrecognized file extension {suffix!r} from {opath.name}. '
+            f'Choose from the following: pkl, joblib, dill, cloudpickle, skops, onnx',
+        )
+
+    return model
+
 def dump_pandas(
     data : pd.DataFrame | pd.Series,
     opath: Path,
