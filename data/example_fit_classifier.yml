@@ -1,8 +1,6 @@
 outputs:
-    pandas_format : csv
-    image_format: jpg
+    pandas_format: csv
     toggles:
-        save_input_configs       : false
         save_final_config        : true
         save_git_diff            : false
         save_test_scores         : false
@@ -33,6 +31,21 @@ train_test_iterator:
 
     # TODO: Option X) GridSearchCV on train set + evaluation of best model on test set
 
-# train_on_all : True
+estimator:
+    make_pipeline:
+        steps:
+            - StandardScaler
+            - [ExtraTreesClassifier, {
+                n_estimators: 10
+            }]
 
-estimator: ExtraTreesClassifier
+fit:
+    scoring:
+        - accuracy
+        - f1
+        - roc_auc
+    n_jobs: 2
+    verbose: 3
+
+logging:
+    level: DEBUG

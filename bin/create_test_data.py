@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # Standard library
 import argparse
 import logging
@@ -73,6 +74,7 @@ def parse_argv() -> argparse.Namespace:
         "-l",
         "--log-level",
         choices=logging_utils.LOG_LEVEL_CHOICES,
+        default=logging.INFO,
         help="Root logging level",
     )
     return parser.parse_args()

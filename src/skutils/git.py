@@ -52,7 +52,7 @@ def summarize_version_control(path: Path) -> str:
         if line.strip():
             lines.append(line.replace("\t", " " * 4))
     git_status = "\n".join(lines)
-    summary = f"Git Hash: {git_hash}" "\n" f"Git Status:\n{git_status}"
+    summary = f"Git Hash: {git_hash}" "\n" f"Git Status:\n\n{git_status}\n"
 
     ########################################
     return summary

@@ -43,7 +43,7 @@ def test_fit_supervised_model():
     _set_unset_returns(cfg['returns'], ocfg['toggles'])
 
     cfg['estimator'] = 'ExtraTreesClassifier'
-    cfg['fit']['scoring'] = ['accuracy']
+    cfg['fit'] = {'scoring' : ['accuracy']}
 
     ########################################
     # Test default train-test evaluation
@@ -151,6 +151,8 @@ def test_fit_supervised_model():
             assert fits_columns == ['fit_time']
             _test_fits(results['fits'])
             _test_feature_importances(results['feature_importances'], split_names)
+        elif return_key == 'return_X':
+            assert results_keys == ['X']
         else:
             assert False, f'No test for return cfg: {return_key}'
 

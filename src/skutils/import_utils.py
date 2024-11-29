@@ -339,6 +339,8 @@ _SPLITTERS = {
     # Section 3.2
     'GridSearchCV'       : 'sklearn.model_selection',
     'RandomizedSearchCV' : 'sklearn.model_selection'
+    # 'HalvingGridSearchCV'       : 'sklearn.model_selection' # Experimental
+    # 'HalvingRandomizedSearchCV' : 'sklearn.model_selection' # Experimental
 }
 
 def flatten_dict(d):

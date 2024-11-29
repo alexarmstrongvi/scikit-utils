@@ -13,7 +13,14 @@ dependencies = [
     "scikit-learn >= 1.5.2",
     "seaborn      >= 0.13.2",
     "shapely      >= 2.0.6",
+    "tensorboard  >= 2.18.0",
+    "tensorboardx >= 2.6.2.2",
 ]
+
+# TODO: Start a dependency group for extra visualization tools that aren't
+# necessary to simply fit a model and evaluate it's performance.
+# [project.optional-dependencies]
+# vis = []
 
 [dependency-groups]
 dev = [
@@ -26,6 +33,7 @@ dev = [
 
 [project.scripts]
 skutils = "skutils.bin.run_skutils:main"
+
 
 [build-system]
 requires      = ["setuptools"]

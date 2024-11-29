@@ -22,6 +22,8 @@ outputs:
     # Format in which to save plots
     # Choices: see matplotlib.Figure.savefig
     image_format : png # Any format that can passed to matplotlib Figure.savefig
+    # Save metrics and visuals as tensorboard log
+    tensorboard : false
     # Toggles for which outputs to save
     toggles:
         # Reproducibility
@@ -66,6 +68,13 @@ pos_label : null
 
 model_selector: null
 
+# Configure the iteration over train-test folds.
+# Option 1) Scikit-learn cross validator with all defaults
+# train_test_iterator : KFold
+# Option 2) Scikit-learn cross validator with keyword arguments
+# train_test_iterator :
+#     KFold:
+#         n_splits: 10
 train_test_iterator : train_test_split
 
 train_on_all : false
@@ -93,12 +102,8 @@ simplify_prediction_cols: false
 # TODO: Allow user to specify multiple estimators as a list or even "all Classifiers"
 estimator: null
 
-fit:
-    # return_* keywords determined by save_* parameters in outputs section so no
-    # need to manually set them here
-    scoring: null
-    # - accuracy
-    # - neg_log_loss
+# Keyword arguments for model_selection.cross_validate
+fit: null
 
 visualization:
     # Classifier predict
@@ -131,6 +136,7 @@ visualization:
 # Toggle what gets returned by fit_supervised_model()
 # null -> determine automatically based on outputs to be saved
 returns:
+    return_X                   : null
     return_y_true              : null
     return_test_scores         : null
     return_train_scores        : null
