@@ -510,14 +510,21 @@ def assign_groups_to_folds(group: pd.Series, n_splits: int) -> pd.Series:
     # Return entries with
     return group.replace(group_to_fold_id).rename('fold_id')
 
-def _require_dataframe(df = None, **columns):
+def _require_dataframe(df = None, **columns) -> tuple[pd.DataFrame, list]:
+    '''
+    Take several possible inputs and always return a dataframe with it's column
+    names.
+    '''
     if isinstance(df, pd.DataFrame):
         col_names = {k:v for k,v in columns.items() if v is not None}
         if len(col_names) == 0:
-            df = df.index.to_frame(name='index')
+            # Case 1) DataFrame and no column names implying index requested
+            df = df.index.to_frame()
         else:
+            # Case 2) DataFrame and it's column names passed
             df = df[list(col_names.values())]
     elif df is None:
+        # Case 3) Separate arrays or Series passed for each column
         df, col_names = pd.DataFrame(columns), list(columns.keys())
     else:
         raise TypeError(f'Expected DataFrame but got {type(df)}')

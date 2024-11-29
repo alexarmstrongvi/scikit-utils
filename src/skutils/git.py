@@ -43,13 +43,6 @@ def get_diff(path: Path) -> str:
 
 def summarize_version_control(path: Path) -> str:
     """Summarize the version control state of this package."""
-    # TODO: Handle multiple version control systems
-    # import version_control
-    # if version_control.SYSTEM is not version_control.VCS.GIT:
-    #     raise NotImplementedError
-
-    ########################################
-    # Git summary
     git_hash = get_hash(path)
     git_status = get_status(path)
     # Remove hints on how to use git from status

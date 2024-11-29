@@ -8,13 +8,15 @@ from sklearn.utils.validation import _check_pos_label_consistency
 
 ################################################################################
 def plot_confusion_matrix(
-    y_true       : pd.DataFrame,
+    y_true       : pd.Series,
     y_pred       : pd.DataFrame,
     is_test_data : pd.DataFrame,
     display_kw   : dict | None = None,
 ) -> dict[str, Figure]:
+    assert len(y_true) == len(y_pred) == len(is_test_data)
     kwargs = display_kw or {}
     figures = {}
+    iterable = []
     if 'split' in y_pred.index.names:
         iterable = [('Combined Splits', (y_true, y_pred['predict']))]
     elif 'split' in y_pred.columns.names:
@@ -35,7 +37,7 @@ def plot_confusion_matrix(
     return figures
 
 def plot_roc_curve(
-    y_true       : pd.DataFrame,
+    y_true       : pd.Series,
     y_pred       : pd.DataFrame,
     is_test_data : pd.DataFrame,
     pos_label    : int | str | None = None,
@@ -44,11 +46,10 @@ def plot_roc_curve(
     kwargs = display_kw or {}
     pos_label = _check_pos_label_consistency(pos_label, y_true)
     prob_col = f'prob({pos_label})'
+    assert len(y_true) == len(y_pred) == len(is_test_data)
 
     figures = {}
-    if 'split' in y_pred.index.names:
-        iterable = [('combined_splits', (y_true, y_pred[prob_col]))]
-    elif 'split' in y_pred.columns.names:
+    if 'split' in y_pred.columns.names:
         splits = y_pred.columns.get_level_values('split').unique()
         iterable = []
         for split in splits:
@@ -56,6 +57,8 @@ def plot_roc_curve(
             y_true_split = y_true.loc[filt]
             y_pred_split = y_pred.loc[filt, (split, prob_col)]
             iterable.append((split, (y_true_split, y_pred_split)))
+    else:
+        iterable = [('combined_splits', (y_true, y_pred[prob_col]))]
 
     # TODO: Decide how to plot multiple ROC curves for each split: Overlay in a
     # single plot or separate plots? How to set title and filename?

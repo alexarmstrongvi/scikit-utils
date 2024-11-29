@@ -14,8 +14,9 @@ from typing import Any, Literal, TypedDict
 import numpy as np
 import pandas as pd
 from pandas import DataFrame, Series
-from sklearn.base import BaseEstimator
+from sklearn.base import BaseEstimator, is_classifier
 from sklearn.model_selection import GridSearchCV, cross_validate
+from sklearn.utils.validation import _check_pos_label_consistency
 import yaml
 
 # 1st party
@@ -73,6 +74,7 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
     ########################################
     # Setup
     log.info('Setting up for fit')
+
     random_gen   = np.random.default_rng(cfg['random_seed'])
     random_state = np.random.RandomState(random_gen.bit_generator)
 
@@ -84,19 +86,21 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
         train_test_iterator = TrainOnAllWrapper(train_test_iterator)
 
     estimator = build_estimator(cfg['estimator'])
+    is_classification = is_classifier(estimator)
 
     ########################################
     log.info('Preprocessing data')
-    X, y = preprocess_data(data, **cfg['preprocess'])
+    X, y, groups = preprocess_data(data, **cfg['preprocess'])
     feature_names = X.columns.tolist()
 
     if cfg_return['return_y_true'] and n_outputs == 1:
         return {'y_true' : y}
 
     ########################################
-    y_pred = None
-    is_test_data = None
+    y_pred              = None
+    is_test_data        = None
     feature_importances = None
+    fit_results         = None
     if cfg['model_selector'] is not None:
         # TODO: Implement evaluation of multiple models with different
         # parameters. Not possible to save out as much information so the
@@ -106,9 +110,9 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
         # fit_results.update(...)
     else:
         log.info('Running training and testing')
-        return_predictions  = cfg_return['return_train_predictions'] or cfg_return['return_test_predictions']
-        return_estimators = cfg_return['return_estimators'] or cfg_return['return_feature_importances'] or return_predictions
-        return_indices    = cfg_return['return_indices'] or return_predictions
+        return_predictions = cfg_return['return_train_predictions'] or cfg_return['return_test_predictions']
+        return_estimators  = cfg_return['return_estimators'] or cfg_return['return_feature_importances'] or return_predictions
+        return_indices     = cfg_return['return_indices'] or return_predictions
         # TODO: Implement general train_test function that has the
         # parallelization of cross_validate but allows the user full
         # configuration to, say, save out train predictions and scores
@@ -117,6 +121,7 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
             estimator,
             X,
             y,
+            groups             = groups,
             cv                 = train_test_iterator,
             return_train_score = cfg_return['return_train_scores'],
             return_estimator   = return_estimators,
@@ -132,7 +137,6 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
                 del fit_results['score_time']
 
         n_splits = len(fit_results['fit_time'])
-        # TODO: Allow user to provide format string (e.g. "Split {i}")
         split_names = _get_split_names(cfg['split_names'], n_splits, cfg['train_on_all'])
 
         fit_results, is_test_data = to_cross_validate_dataframes(
@@ -142,6 +146,7 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
         )
 
         if return_predictions:
+            # Checks and Setup
             assert is_test_data is not None
             return_only_train_pred = not cfg_return['return_test_predictions']
             return_only_test_pred  = not cfg_return['return_train_predictions']
@@ -153,9 +158,17 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
             else:
                 masks = (mask.notna() for _, mask in is_test_data.items())
 
-            y_pred = pd.concat(
+            pos_label = cfg['pos_label']
+            if is_classification:
+                pos_label = _check_pos_label_consistency(pos_label, y)
+            simplify = cfg['simplify_prediction_cols']
+
+            # Get predictions from trained estimator on all requested splits of
+            # the data. Predictions can involve multiple columns so the combined
+            # dataframe will use a multi-index column
+            y_pred : pd.DataFrame = pd.concat(
                 [
-                    predict(est, X[mask])
+                    predict(est, X[mask], simplify=simplify, pos_label=pos_label)
                     for est, mask in zip(fit_results['estimator'], masks)
                 ],
                 keys  = split_names,
@@ -168,6 +181,9 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
                 is_notna = y_pred.stack('pred', future_stack=True).notna()
                 if check_is_partition(is_notna):
                     y_pred = combine_predictions(y_pred)
+                    # Don't both keeping split index if there is only one split
+                    if y_pred.index.get_level_values('split').nunique() == 1:
+                        y_pred = y_pred.droplevel('split')
 
     # TODO: Calculate this outside of fit_supervised_model() by returning estimators
     if cfg_return['return_feature_importances']:
@@ -210,12 +226,13 @@ def fit_supervised_model(data: DataFrame, cfg: dict) -> FitSupervisedModelResult
 def preprocess_data(
     data       : pd.DataFrame,
     *,
-    target     : str,
-    features   : Collection[str] | None = None,
-    target_map : dict | None = None,
     astype     : dict | None = None,
     index      : Any = None,
-) -> tuple[DataFrame, Series]:
+    features   : Collection[str] | None = None,
+    target     : str,
+    target_map : dict | None = None,
+    groups     : str | None = None,
+) -> tuple[DataFrame, Series, Series | None]:
     '''Preprocess the raw data for model fitting
 
     This SHOULD NOT INVOLVE data-dependent transformations (e.g. interpolate
@@ -229,7 +246,7 @@ def preprocess_data(
     if index is not None:
         data = data.set_index(index)
     else:
-        data = data.rename_axis(index='index')
+        data = data.rename_axis('index')
 
     if features is None:
         features = data.columns.drop(target)
@@ -241,13 +258,14 @@ def preprocess_data(
     # data leakage and should be run separately in the case of cross validation.
 
     # TODO: Save any columns not in features or target to metadata and return?
-    X = data[features]
-    y = data[target]
+    X   = data[features]
+    y   = data[target]
+    grp = data[groups] if groups is not None else None
 
     if target_map is not None:
         y = y.map(target_map)
 
-    return X, y
+    return X, y, grp
 
 def build_estimator(cfg: str | dict) -> BaseEstimator:
     '''Build sklearn estimators from a yaml compatible dictionary'''
@@ -260,6 +278,8 @@ def build_estimator(cfg: str | dict) -> BaseEstimator:
         case dict() if len(cfg) == 1:
             class_, kwargs = tuple(cfg.items())[0]
             estimator = import_object(class_)(**kwargs)
+        case _:
+            raise ValueError(f'Unexpected estimator config: {cfg}')
     return estimator
 
 def build_train_test_iterator(
@@ -307,32 +327,38 @@ def _save_results(
     ext_model  = ocfg['model_format']
     cfg_save = ocfg['toggles']
 
+
     if cfg_save['save_test_scores'] or cfg_save['save_train_scores']:
-        fits = results['fits']
+        assert 'fits' in results
         opath = odir / f'fits.{ext_pandas}'
-        dump_pandas(fits.drop(columns='estimator', errors='ignore'), opath)
+        dump_pandas(results['fits'].drop(columns='estimator', errors='ignore'), opath)
         log.info('Saved fit results: %s', opath)
 
     if cfg_save['save_estimators']:
-        estimators = fits['estimator']
+        assert 'fits' in results
+        assert 'estimator' in results['fits']
         odir_models = odir / 'models'
         odir_models.mkdir()
-        for split, est in estimators.items():
+        for split, est in results['fits']['estimator'].items():
+            assert isinstance(est, BaseEstimator)
             opath = odir_models / f'{est.__class__.__name__}_{split}.{ext_model}'
             dump_model(est, opath)
             log.info('Estimator saved: %s', opath)
 
     if cfg_save['save_test_predictions'] or cfg_save['save_train_predictions']:
+        assert 'y_pred' in results
         opath = odir / f'predictions.{ext_pandas}'
         dump_pandas(results['y_pred'], opath)
         log.info('Saved predictions: %s', opath)
 
     if cfg_save['save_indices']:
+        assert 'is_test_data' in results
         opath = odir / f'is_test_data.{ext_pandas}'
         dump_pandas(results['is_test_data'], opath)
         log.info('Saved test data per split flags: %s', opath)
 
     if cfg_save['save_feature_importances']:
+        assert 'feature_importances' in results
         opath = odir / f'feature_importances.{ext_pandas}'
         dump_pandas(results['feature_importances'], opath)
         log.info('Saved feature importances results: %s', opath)
@@ -346,14 +372,36 @@ def _save_visualizations(
     odir         = Path(ocfg['path'])/'visualization'
     ext          = ocfg['image_format']
     cfg_save     = ocfg['toggles']
-    y_true       = results['y_true']
-    y_pred       = results['y_pred']
-    is_test_data = results['is_test_data']
+    y_true       = results.get('y_true')
+    y_pred       = results.get('y_pred')
+    is_test_data = results.get('is_test_data')
     odir.mkdir()
+
+    # No guarantee y_true and is_test_data have the same entries as y_pred so
+    # get an index that can be used to select the corresponding entries when
+    # comparing truth to prediction. For example, if only predictions on a
+    # holdout set were done, y_pred would only exist for those values.
+    pred_index = None
+    if y_pred is not None:
+        pred_index = y_pred.index
+        if isinstance(pred_index, pd.MultiIndex):
+            # TODO: Get correct index without assuming it is the first level
+            pred_index = pred_index.levels[0]
 
     # Classifier predict
     if cfg_save['save_confusion_matrix_plot']:
-        figures = plot.plot_confusion_matrix(y_true, y_pred, is_test_data, cfg['ConfusionMatrixDisplay'])
+        assert (
+            y_true is not None
+            and y_pred is not None
+            and is_test_data is not None
+            and isinstance(y_true, pd.Series)
+        )
+        figures = plot.plot_confusion_matrix(
+            y_true.loc[pred_index],
+            y_pred,
+            is_test_data.loc[pred_index],
+            cfg['ConfusionMatrixDisplay']
+        )
         for split, fig in figures.items():
             opath = odir / f'confusion_matrix_{split}.{ext}'
             fig.savefig(opath, format=ext)
@@ -361,7 +409,19 @@ def _save_visualizations(
 
     # Classifier prob
     if cfg_save['save_roc_curve_plot']:
-        figures = plot.plot_roc_curve(y_true, y_pred, is_test_data, pos_label, cfg['RocCurveDisplay'])
+        assert (
+            y_true is not None
+            and y_pred is not None
+            and is_test_data is not None
+            and isinstance(y_true, pd.Series)
+        )
+        figures = plot.plot_roc_curve(
+            y_true.loc[pred_index],
+            y_pred,
+            is_test_data.loc[pred_index],
+            pos_label,
+            cfg['RocCurveDisplay']
+        )
         for split, fig in figures.items():
             opath = odir / f'roc_curve_{split}.{ext}'
             fig.savefig(opath, format=ext)

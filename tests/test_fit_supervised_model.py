@@ -1,5 +1,6 @@
 
 # Standard library
+from collections import Counter
 import copy
 import logging
 
@@ -18,6 +19,7 @@ from skutils.bin.fit_supervised_model import (
 from skutils.data import get_default_cfg_supervised
 
 logging.getLogger('asyncio').setLevel('WARNING')
+
 
 ################################################################################
 def test_fit_supervised_model():
@@ -47,22 +49,37 @@ def test_fit_supervised_model():
     # Test default train-test evaluation
     results = fit_supervised_model(data, cfg)
     assert list(results.keys()) == ['fits']
-    pd.testing.assert_index_equal(
-        results['fits'].index,
-        pd.Index(['split0'], name='split')
-    )
-    assert results['fits'].columns.to_list() == ['fit_time', 'score_time', 'test_accuracy']
+    fits = results['fits'] # type: ignore[reportTypedDictNotRequiredAccess]
+    pd.testing.assert_index_equal(fits.index, pd.Index(['split0'], name='split'))
+    assert fits.columns.to_list() == ['fit_time', 'score_time', 'test_accuracy']
 
     # Test simple cross validation
     cfg_mod = copy.deepcopy(cfg)
     #TODO: cfg = get_example_cfg('KFold')
     cfg_mod['train_test_iterator'] = 'KFold'
     results = fit_supervised_model(data, cfg_mod)
+    fits = results['fits'] # type: ignore[reportTypedDictNotRequiredAccess]
     pd.testing.assert_index_equal(
-        results['fits'].index,
+        fits.index,
         pd.Index(['split0','split1','split2','split3','split4'], name='split')
     )
-    assert results['fits'].columns.to_list() == ['fit_time', 'score_time', 'test_accuracy']
+    assert fits.columns.to_list() == ['fit_time', 'score_time', 'test_accuracy']
+
+    # Test grouped cross validation
+    cfg_mod = copy.deepcopy(cfg)
+    cfg_mod['train_test_iterator']       = 'GroupKFold'
+    cfg_mod['preprocess']['groups']      = 'groups'
+    cfg_mod['returns']['return_indices'] = True
+    data_grp = data.copy()
+    data_grp['groups'] = np.arange(len(data_grp)) % (len(data)//4)
+    results = fit_supervised_model(data_grp, cfg_mod)
+    # No group value are in multiple splits
+    cnt = Counter()
+    for _, filt in results['is_test_data'].items():
+        cnt.update(data_grp.loc[filt, 'groups'].unique())
+    assert max(cnt.values()) == 1
+
+    # Test stratified cross validation
 
     ########################################
     # Test no output enabled
@@ -70,13 +87,13 @@ def test_fit_supervised_model():
     cfg_mod_no_out['train_test_iterator'] = 'KFold'
     cfg_mod_no_out['returns'] = {k : False for k in cfg_mod['returns']}
     results = fit_supervised_model(data, cfg_mod_no_out)
-    # assert results['fits'].index.to_list() == ['split0','split1','split2','split3','split4']
+    fits = results['fits'] # type: ignore[reportTypedDictNotRequiredAccess]
     pd.testing.assert_index_equal(
-        results['fits'].index,
+        fits.index,
         pd.Index(['split0','split1','split2','split3','split4'], name='split')
     )
-    assert results['fits'].columns.to_list() == ['fit_time']
-    assert results['fits'].notna().all().all()
+    assert fits.columns.to_list() == ['fit_time']
+    assert fits.notna().all().all() # type: ignore[reportAttributeAccessIssue]
 
     # Test single output enabled
     for return_key in cfg['returns']:
@@ -85,6 +102,8 @@ def test_fit_supervised_model():
         results = fit_supervised_model(data, cfg_mod)
 
         results_keys = list(results.keys())
+        fits_columns = []
+        split_names = pd.Index([])
         if 'fits' in results:
             fits_columns = results['fits'].columns.to_list()
             split_names = results['fits'].index
@@ -173,15 +192,17 @@ def test_fit_supervised_model():
     assert pd.api.types.is_unsigned_integer_dtype(results['y_pred']['predict'])
 
     # Test 1c: Binary classifier with categorical target
+    cfg_mod_cat = copy.deepcopy(cfg_mod)
+    cfg_mod_cat['pos_label'] = 'is_positive'
     results = fit_supervised_model(
         (data
+            .astype({'target' : object})
             .replace({'target' : {0 : 'is_negative', 1 : 'is_positive'}})
             .astype({'target' : 'category'})
         ),
-        cfg_mod
+        cfg_mod_cat,
     )
     assert is_categorical_dtype(results['y_pred']['predict'].dtype)
-
 
     # Test X: Multiclass classifier
 
@@ -242,7 +263,10 @@ def test_predict():
         n_clusters_per_class = 1,
         random_state         = 0,
     )
-    X_clf = pd.DataFrame(X, columns = [f'Feature {i}' for i in range(X.shape[1])])
+    X_clf = pd.DataFrame(
+        X,
+        columns = [f'Feature {i}' for i in range(X.shape[1])]
+    )
     y_clf = pd.Series(y, name='target')
 
     clf = ExtraTreesClassifier().fit(X_clf, y_clf)
@@ -273,7 +297,10 @@ def test_predict():
         n_informative        = 2,
         random_state         = 0,
     )
-    X_reg = pd.DataFrame(X, columns = [f'Feature {i}' for i in range(X.shape[1])])
+    X_reg = pd.DataFrame(
+        X,
+        columns = [f'Feature {i}' for i in range(X.shape[1])]
+    )
     y_reg = pd.Series(y, name='target')
 
     reg = ExtraTreesRegressor().fit(X_reg, y_reg)

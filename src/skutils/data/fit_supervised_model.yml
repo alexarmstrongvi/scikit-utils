@@ -18,7 +18,7 @@ outputs:
     # Choices: csv, json, html, xml, xlsx, hdf, feather, parquet, orc, stata, pkl
     #   - see https://pandas.pydata.org/pandas-docs/stable/user_guide/io.html
     # User responsible for installing required 3rd party libraries
-    pandas_format : feather
+    pandas_format : parquet
     # Format in which to save plots
     # Choices: see matplotlib.Figure.savefig
     image_format : png # Any format that can passed to matplotlib Figure.savefig
@@ -59,6 +59,7 @@ preprocess:
     features   : null   # X = df[features]
     target     : target # y = df[target]
     target_map : null   # y = y.map(target_map)
+    groups     : null   # groups = df[groups]
 
 # Value of target column to treat as positive class (only for classification)
 pos_label : null
@@ -82,6 +83,12 @@ split_names: 'split{}'
 # per row. In that case, this option is ignored.
 stack_split_predictions: true
 
+# Simplify estimator prediction outputs by saving out the result of
+# est.predict(X) or est.proba(X) but not both. If classifier is binary, only the
+# positive label will be saved out.
+# NOTE: This can cause crashes if any visualization functions run after the fit
+# require a specific prediction output that is not saved out.
+simplify_prediction_cols: false
 
 # TODO: Allow user to specify multiple estimators as a list or even "all Classifiers"
 estimator: null

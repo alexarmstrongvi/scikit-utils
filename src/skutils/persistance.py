@@ -76,8 +76,12 @@ def dump_pandas(
     suffix = opath.suffix
     # Text format
     if suffix == '.csv':
+        if 'index' not in kwargs and is_range_index(data.index):
+            kwargs['index'] = False
         data.to_csv(opath, **kwargs)
     elif suffix == '.json':
+        if 'index' not in kwargs and is_range_index(data.index):
+            kwargs['index'] = False
         data.to_json(opath, **kwargs)
     elif suffix == '.html':
         data.to_html(opath, **kwargs)
@@ -139,3 +143,44 @@ def read_pandas(path: Path, **kwargs) -> pd.DataFrame:
             f'No reader implemented for files of type {path.suffix}'
         )
     return data
+
+def has_range_index(data: pd.DataFrame | pd.Series) -> bool:
+    '''
+    Examples
+    ========
+    >>> has_range_index(pd.Series(list('abc')))
+    True
+    >>> has_range_index(pd.DataFrame(list('abc')))
+    True
+    >>> has_range_index(pd.Series(list('abc'), index=pd.MultiIndex.from_arrays([[0,1,2],['a','a','b']])))
+    True
+    '''
+    index = data.index
+    if isinstance(index, pd.MultiIndex):
+        return any(is_range_index(level) for level in index.levels)
+    return is_range_index(index)
+
+def is_range_index(index: pd.Index) -> bool:
+    '''
+    Examples
+    ========
+    >>> is_range_index(pd.RangeIndex(5))
+    True
+    >>> is_range_index(pd.Index([0,1,2]))
+    True
+    >>> is_range_index(pd.Index([0.0,1.0,2.0]))
+    True
+    >>> is_range_index(pd.Index([1,3,2]))
+    False
+    '''
+    if isinstance(index, pd.MultiIndex):
+        return False
+    if isinstance(index, pd.RangeIndex):
+        return True
+    if (
+        pd.api.types.is_numeric_dtype(index.dtype)
+        and index[0] == 0
+        and index.diff()[1:].unique() == [1]
+    ):
+        return True
+    return False

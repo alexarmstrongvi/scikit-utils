@@ -1,42 +1,38 @@
 [project]
-name = 'scikit-utils'
-description = 'Utilities for scikit-learn'
-dynamic = ["version"]
+name            = 'scikit-utils'
+description     = 'Utilities for scikit-learn'
+dynamic         = ["version"]
+readme          = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "matplotlib",
-    "numpy",
-    "pandas",
-    "scikit-learn",
-    "seaborn",
-    "shapely",  # Used in roc.py
-    "pyarrow",
-    "pyyaml"
+    "matplotlib   >= 3.9.2",
+    "numpy        >= 2.1.3",
+    "pandas       >= 2.2.3",
+    "pyarrow      >= 18.1.0",
+    "pyyaml       >= 6.0.2",
+    "scikit-learn >= 1.5.2",
+    "seaborn      >= 0.13.2",
+    "shapely      >= 2.0.6",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
-    # Testing
-    "pytest",
-    "tox",
-    # REPL
-    "ipykernel",
-    # Debugging
-    "ipdb",
-    # Code quality
-    "flake8",     # Linter
-    "pylint",     # Linter
-    "isort",      # Import order checker
-    "radon",      # Complexity checker
-    "coverage",   # Coverage checker
-    "pytest-cov", # Coverage checker plugin for pytest
-    # Centralized Version Control
-    "pre-commit",
+    "coverage   >= 7.6.8",
+    "ipdb       >= 0.13.13",
+    "ipykernel  >= 6.29.5",
+    "pytest     >= 8.3.3",
+    "pytest-cov >= 6.0.0",
 ]
 
 [project.scripts]
 skutils = "skutils.bin.run_skutils:main"
 
+[build-system]
+requires      = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+################################################################################
+# Tools
 ################################################################################
 [tool.setuptools.dynamic]
 version = {attr = "skutils.__version__"}
@@ -48,12 +44,12 @@ filterwarnings = [
 ]
 
 [tool.isort]
-import_heading_stdlib = "Standard library"
-import_heading_thirdparty = "3rd party"
-import_heading_firstparty = "1st party"
+import_heading_stdlib      = "Standard library"
+import_heading_thirdparty  = "3rd party"
+import_heading_firstparty  = "1st party"
 import_heading_localfolder = "Local"
 force_sort_within_sections = true
-multi_line_output = 3 # Vertical Hanging Indent
+multi_line_output          = 3 # Vertical Hanging Indent
 
 [tool.pylint.main]
 recursive = true
