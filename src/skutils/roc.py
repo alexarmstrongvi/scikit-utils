@@ -3,7 +3,8 @@
 from collections.abc import Collection, Sequence
 from functools import cached_property, partial
 import logging
-from typing import Literal, NamedTuple
+from typing import Any, Literal, NamedTuple
+import warnings
 
 # 3rd party
 from matplotlib.axes import Axes
@@ -25,105 +26,11 @@ log = logging.getLogger(__name__)
 # Alias
 NDArrayFloat = npt.NDArray[np.floating]
 
+ThresholdMethod = Literal['linear', 'log', 'percentile', 'evenly_spaced']
+"""Methods for choosing a subset of threshold values on a ROC curve. See
+`compute_thresholds` for implementation"""
 
 ################################################################################
-def plot_roc_curve_comparison(
-    data         : pd.DataFrame | None = None,
-    *,
-    y_true       : str | NDArrayFloat = 'y_true',
-    y_score      : str | NDArrayFloat = 'y_score',
-    # Optional
-    roc_kwargs : dict | None = None,
-    **kwargs
-    # hue : str | None = None,
-    # col : str | None = None,
-    # row : str | None = None,
-    # col_wrap : int | None = None,
-    # row_order: list[str] | None = None,
-    # col_order: list[str] | None = None,
-) -> FacetGrid:
-    # Argument check
-    data, col_names = _require_dataframe(
-        data,
-        y_true  = y_true,
-        y_score = y_score,
-        hue     = kwargs.get('hue'),
-        col     = kwargs.get('col'),
-        row     = kwargs.get('row'),
-    )
-    y_true, y_score = col_names[:2]
-
-    grid = sns.FacetGrid(data, **kwargs)
-    roc_kwargs = roc_kwargs or {}
-    grid.map(_facetgrid_plot_roc_curve, y_true, y_score, **roc_kwargs)
-    grid.add_legend()
-    return grid
-
-def plot_roc_curve_grid(
-    data         : pd.DataFrame | None = None,
-    *,
-    y_true       : str | NDArrayFloat,
-    y_score      : str | NDArrayFloat,
-    # Optional
-    ci_band_rocs : list[pd.DataFrame] | None = None,
-) -> tuple[Figure, Axes]:
-    data, (y_true, y_score) = _require_dataframe(data, y_true=y_true, y_score=y_score)
-    roc  = roc_curve(data, y_true=y_true, y_score=y_score, drop_intermediate=False)
-
-    fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(10,10), layout='tight')
-
-    ax = axs[0][0]
-    # TODO: Add thresholds as vlines
-    sns.histplot(data, x=y_score, hue=y_true, bins=25, ax = ax)
-    ax.legend(title=None, labels=['TP', 'FP'])
-    ax.set_title('Score distribution')
-    # ax.semilogy()
-
-    plot_rate_curve(roc.index, roc['fpr'], label='FPR', ci_width=95, n_samples=len(data), ax=axs[0][1])
-    plot_rate_curve(roc.index, roc['tpr'], label='TPR', ci_width=95, n_samples=len(data), ax=axs[1][0])
-
-    plot_roc_curve(
-        data            = roc.reset_index(),
-        plot_thresholds = 'percentile',
-        plot_diagonal   = True,
-        ci_band_rocs    = ci_band_rocs,
-        ax              = axs[1][1],
-    )
-    return fig, axs
-
-def _facetgrid_plot_roc_curve(
-    y_true  : str,
-    y_score : str,
-    data = None,
-    *,
-    n_resamples: int = 0,
-    color = None,
-    label = None,
-    # plot_roc_curve kwargs
-    **kwargs,
-) -> Axes:
-    data, (y_true, y_score) = _require_dataframe(data, y_true=y_true, y_score=y_score)
-    roc  = roc_curve(data, y_true=y_true, y_score=y_score, drop_intermediate=False)
-    bootstrap_rocs = None
-    if n_resamples > 0:
-        bootstrap_rocs = bootstrap(
-            data,
-            y_true=y_true,
-            y_score=y_score,
-            n_resamples=n_resamples,
-            drop_intermediate=False,
-        )
-    ax = plot_roc_curve(
-        data         = roc.reset_index(),
-        ci_band_rocs = bootstrap_rocs,
-        color        = color,
-        label        = label,
-        ax           = plt.gca(),
-        **kwargs
-    )
-    # ax.set_title(None)
-    return ax
-
 def plot_roc_curve(
     data: pd.DataFrame | None = None,
     *,
@@ -133,7 +40,7 @@ def plot_roc_curve(
     thresholds      : str | NDArrayFloat = 'thresholds',
     # Optional
     # TODO: allow specifying threshold, fpr, and tpr values
-    plot_thresholds : str | Sequence | None = None,
+    plot_thresholds : ThresholdMethod | Sequence | None = None,
     n_thresholds    : int = 5,
     plot_diagonal   : bool = False,
     ci_band_rocs    : list[pd.DataFrame] | None = None,
@@ -143,10 +50,61 @@ def plot_roc_curve(
     ax              : Axes | None = None,
 ) -> Axes:
     '''
-    Example usage:
-    ax = plot_roc_curve(data=df, fpr='fpr', tpr='tpr', thresholds='thresholds')
-    ax = plot_roc_curve(fpr=fpr, tpr=tpr, thresholds=thresholds)
-    plot_roc_curve(fpr=fpr, tpr=tpr, thresholds=thresholds, ax=ax)
+    Plot a ROC curve data with options to add
+
+    Parameters
+    ==========
+    data:
+        Optional dataframe with ROC data
+    fpr:
+        False positive rate data or column name
+    tpr:
+        True positive rate data or column name
+    thresholds:
+        Threshold data or column name
+    plot_thresholds:
+        Threshold values to plot or the name of a method for determining
+        thresholds
+    n_thresholds:
+        Number of thresholds do determine if method name specified for
+        `plot_thresholds`
+    plot_diagonal:
+        Plot diagonal characterizing performance of random guessing
+    ci_band_rocs:
+        Other ROC curves sampled from the same underlying distribution (e.g.
+        bootstraping, cross-validation) to use for generating CI bands
+    ci_width:
+        Width of CI bands to interpolate to
+    color:
+        Color of ROC curve and related artist objects
+    label:
+        Label of ROC curve
+    ax:
+        Axes object to add to. Otherwise, new one is created.
+
+
+    Usage
+    =====
+    >>> from skutils.roc import roc_curve, plot_roc_curve, bootstrap
+    >>> df = pd.read_csv('model_predictions.csv')
+    >>> df_roc = roc_curve(y_true=df['y_true'], y_score=df['y_score'])
+
+    >>> ax = plot_roc_curve(fpr=df_roc['fpr'], tpr=df_roc['tpr'])
+    >>> plt.show()
+
+    >>> ax = roc_utils.plot_roc_curve(
+    ...     fpr             = df_roc["fpr"],
+    ...     tpr             = df_roc["tpr"],
+    ...     thresholds      = df_roc.index,
+    ...     plot_diagonal   = True,
+    ...     plot_thresholds = "evenly_spaced",
+    ...     ci_band_rocs    = roc_utils.bootstrap(
+    ...         y_true=df["y_true"],
+    ...         y_score=df["y_score"],
+    ...         n_resamples=10,
+    ...     ),
+    ... )
+    >>> plt.show()
     '''
     if ax is None:
         ax = plt.subplot()
@@ -198,16 +156,173 @@ def plot_roc_curve(
         handles.append(hdl_thr)
         labels.append('Ref thresholds')
 
-    if ax.get_title() is None:
+    if not ax.get_title():
         title = 'ROC Curve'
         if plot_thresholds:
             thr_str = ', '.join(f'{x:.2f}' for x in reversed(thr_to_plot))
-            title += f'\nThresholds: > {thr_str}'
+            title += f'\nThresholds: $>${thr_str}'
         ax.set_title(title)
-    ax.set_xlabel('False Positive Rate')
-    ax.set_ylabel('True Positive Rate')
+    # ax.set_xlabel('False Positive Rate')
+    # ax.set_ylabel('True Positive Rate')
     ax.grid()
     ax.legend(handles, labels)
+    return ax
+
+def plot_roc_curve_comparison(
+    data    : pd.DataFrame | None = None,
+    *,
+    y_true  : str | NDArrayFloat = 'y_true',
+    y_score : str | NDArrayFloat = 'y_score',
+    # Optional
+    roc_kws : dict | None = None,
+    **kwargs
+    # TODO: Add explicit args once I know what is needed
+    # hue : str | None = None,
+    # col : str | None = None,
+    # row : str | None = None,
+    # col_wrap : int | None = None,
+    # row_order: list[str] | None = None,
+    # col_order: list[str] | None = None,
+) -> FacetGrid:
+    '''
+    Plot ROC curves of various subsets of the data for comparison
+    Parameters
+    ==========
+    data:
+    y_true:
+    y_score:
+    roc_kws:
+        Additional parameters to control individual ROC curves. The kwargs are
+        passed to plot_roc_curve.
+    **kwargs
+        Additional parameters to control grid. The kwargs are passed to
+        seaborn.FacetGrid.
+
+    Usage
+    =====
+    >>> from skutils.roc import plot_roc_curve_comparison
+    >>> df = pd.read_csv('model_predictions.csv')
+    >>> roc_utils.plot_roc_curve_comparison(
+    ...     df,
+    ...     roc_kws=dict(n_resamples = 10),
+    ...     hue = 'category',
+    ...     col = 'group',
+    ...     col_wrap  = 2,
+    ... )
+    >>> plt.show()
+
+    >>> roc_utils.plot_roc_curve_comparison(
+    ...     df,
+    ...     col = 'group',
+    ...     row = 'category'
+    ... )
+    >>> plt.show()
+
+    '''
+    # Argument check
+    data, col_names = _require_dataframe(
+        data,
+        y_true  = y_true,
+        y_score = y_score,
+        hue     = kwargs.get('hue'),
+        col     = kwargs.get('col'),
+        row     = kwargs.get('row'),
+    )
+    y_true, y_score = col_names[:2]
+
+    grid = sns.FacetGrid(data, **kwargs)
+    roc_kws = roc_kws or {}
+    grid.map(_facetgrid_plot_roc_curve, y_true, y_score, **roc_kws)
+    grid.add_legend()
+    return grid
+
+def plot_roc_curve_grid(
+    data         : pd.DataFrame | None = None,
+    *,
+    y_true       : str | NDArrayFloat,
+    y_score      : str | NDArrayFloat,
+    # Optional
+    ci_band_rocs : list[pd.DataFrame] | None = None,
+    roc_kws      : dict[str, Any] | None = None,
+) -> tuple[Figure, Axes]:
+    '''
+    Plot grid with ROC curve as well as raw score distribution and
+    rate-vs-threshold curves.
+
+    Parameters
+    ==========
+    data:
+    y_true:
+    y_score:
+    ci_band_rocs:
+        See plot_roc_curve.
+    roc_kws:
+        Additional parameters to control ROC curve. The kwargs are passed to
+        plot_roc_curve.
+
+
+    Usage
+    =====
+    >>> from skutils.roc import plot_roc_curve_grid
+    >>> df = pd.read_csv('model_predictions.csv')
+    >>> ax = plot_roc_curve_grid(fpr=df_roc['fpr'], tpr=df_roc['tpr'])
+    >>> roc_utils.plot_roc_curve_grid(y_true=df['y_true'], y_score=df['y_score'])
+    >>> plt.show()
+    '''
+    data, (y_true, y_score) = _require_dataframe(data, y_true=y_true, y_score=y_score)
+    roc  = roc_curve(data, y_true=y_true, y_score=y_score, drop_intermediate=False)
+
+    fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(10,10), layout='tight')
+
+    ax = axs[0][0]
+    # TODO: Add thresholds as vlines
+    sns.histplot(data, x=y_score, hue=y_true, bins=25, ax = ax)
+    ax.legend(title=None, labels=['TP', 'FP'])
+    ax.set_title('Score distribution')
+    # ax.semilogy()
+
+    plot_rate_curve(roc.index, roc['fpr'], label='FPR', ci_width=95, n_samples=len(data), ax=axs[0][1], transpose=True)
+    plot_rate_curve(roc.index, roc['tpr'], label='TPR', ci_width=95, n_samples=len(data), ax=axs[1][0])
+
+    plot_roc_curve(
+        data            = roc.reset_index(),
+        ci_band_rocs    = ci_band_rocs,
+        ax              = axs[1][1],
+        **roc_kws,
+    )
+    return fig, axs
+
+################################################################################
+def _facetgrid_plot_roc_curve(
+    y_true  : str,
+    y_score : str,
+    data = None,
+    *,
+    n_resamples: int = 0,
+    color = None,
+    label = None,
+    **roc_kws,
+) -> Axes:
+    data, (y_true, y_score) = _require_dataframe(data, y_true=y_true, y_score=y_score)
+    roc  = roc_curve(data, y_true=y_true, y_score=y_score, drop_intermediate=False)
+    bootstrap_rocs = None
+    if n_resamples > 0:
+        bootstrap_rocs = bootstrap(
+            data,
+            y_true=y_true,
+            y_score=y_score,
+            n_resamples=n_resamples,
+            drop_intermediate=False,
+        )
+    ax = plot_roc_curve(
+        data         = roc.reset_index(),
+        ci_band_rocs = bootstrap_rocs,
+        color        = color,
+        label        = label,
+        ax           = plt.gca(),
+        **roc_kws
+    )
+    # ax.set_title(None)
     return ax
 
 def plot_rate_curve(
@@ -216,19 +331,40 @@ def plot_rate_curve(
     label,
     ci_width = 0,
     n_samples = 0,
+    transpose = False,
     ax = None
 ) -> Axes:
     if ax is None:
         ax = plt.subplot()
-    if ci_width > 0 and n_samples > 0:
-        count_hi, count_lo = scipy.stats.binom.interval(ci_width/100, n=n_samples, p=rate)
-        rate_hi, rate_lo = count_hi/n_samples, count_lo/n_samples
-    rate_pts = ax.scatter(thresholds, rate, marker='.')
-    ci_bands = ax.fill_between(thresholds, rate_lo, rate_hi, alpha=0.2, color='tab:blue')
-    ax.set_xlabel('Threshold')
-    ax.set_ylabel(label)
+    add_ci_bands = ci_width > 0 and n_samples > 0
+    if add_ci_bands:
+        count_lo, count_hi = scipy.stats.binom.interval(ci_width/100, n=n_samples, p=rate)
+        rate_lo, rate_hi = count_lo/n_samples, count_hi/n_samples
+        print(rate_lo)
+        print(rate_hi)
+
+    if transpose:
+        x = rate
+        y = thresholds
+        fill_between = ax.fill_betweenx
+        set_thr_label = ax.set_ylabel
+        set_rate_label = ax.set_xlabel
+    else:
+        x = thresholds
+        y = rate
+        fill_between = ax.fill_between
+        set_thr_label = ax.set_xlabel
+        set_rate_label = ax.set_ylabel
+
+    rate_pts = ax.scatter(x, y, marker='.')
+    if add_ci_bands:
+        ci_bands = fill_between(thresholds, rate_lo, rate_hi, alpha=0.2, color='tab:blue')
+    set_thr_label('Threshold')
+    set_rate_label(label)
     ax.grid()
-    ax.legend([(rate_pts, ci_bands)],[rf'{label} $\pm$ {ci_width}% CL'])
+    if add_ci_bands:
+        ax.legend([(rate_pts, ci_bands)],[rf'{label} $\pm$ {ci_width}% CL'])
+
     return ax
 
 def plot_roc_ci_bands(
@@ -240,7 +376,7 @@ def plot_roc_ci_bands(
     tpr_lo = 'tpr_lo',
     color  = None,
     ax : Axes | None = None,
-) -> tuple[Axes, list[Polygon]]:
+) -> tuple[Axes, Polygon]:
     if ax is None:
         ax = plt.subplot()
     data, (fpr_hi, fpr_lo, tpr_hi, tpr_lo) = _require_dataframe(
@@ -261,10 +397,27 @@ def plot_roc_ci_bands(
     polygon, = ax.fill(x, y, color=color, alpha=0.2)
     return ax, polygon
 
-def is_monotonic_increasing(arr):
-    return np.all(arr[1:] >= arr[:-1])
-def is_monotonic_decreasing(arr):
-    return np.all(arr[1:] <= arr[:-1])
+################################################################################
+def roc_curve(
+    data = None,
+    *,
+    y_true = 'y_true',
+    y_score = 'y_score',
+    **kwargs,
+) -> pd.DataFrame:
+    '''Wrapper for sklearn.metrics.roc_curve that can accept and will always
+    return a DataFrame'''
+    data, (y_true, y_score) = _require_dataframe(data, y_true=y_true, y_score=y_score)
+    return pd.DataFrame(
+        data = np.column_stack(
+            sklearn.metrics.roc_curve(
+                y_true  = data[y_true],
+                y_score = data[y_score],
+                **kwargs,
+            )
+        ),
+        columns = ['fpr', 'tpr', 'thresholds'],
+    ).set_index('thresholds', verify_integrity=True)
 
 class ROCPoint(NamedTuple):
     fpr : float
@@ -273,7 +426,7 @@ class ROCPoint(NamedTuple):
 
 # TODO: Define and then inherit from ParametricCurve2D(x,y,t):
 class ROCCurve:
-    _interp = partial(np.interp, left=np.nan, right=np.nan)
+    _interp = staticmethod(partial(np.interp, left=np.nan, right=np.nan))
 
     def __init__(
         self,
@@ -348,12 +501,12 @@ class ROCCurve:
         thresholds : float | NDArrayFloat | None = None,
     ) -> float | NDArrayFloat:
         return self._interpolate_generic(
-            x1          = tpr,
-            xp1         = self.tpr,
-            fp1         = self.fpr,
-            x2          = thresholds,
-            xp2         = self.thresholds[::-1],
-            fp2         = self.fpr[::-1],
+            x1  = tpr,
+            xp1 = self.tpr,
+            fp1 = self.fpr,
+            x2  = thresholds,
+            xp2 = self.thresholds[::-1],
+            fp2 = self.fpr[::-1],
         )
     def interpolate_tpr(
         self,
@@ -362,12 +515,12 @@ class ROCCurve:
         thresholds : float | NDArrayFloat | None = None,
     ) -> float | NDArrayFloat:
         return self._interpolate_generic(
-            x1          = fpr,
-            xp1         = self.fpr,
-            fp1         = self.tpr,
-            x2          = thresholds,
-            xp2         = self.thresholds[::-1],
-            fp2         = self.tpr[::-1],
+            x1  = fpr,
+            xp1 = self.fpr,
+            fp1 = self.tpr,
+            x2  = thresholds,
+            xp2 = self.thresholds[::-1],
+            fp2 = self.tpr[::-1],
         )
     def interpolate_threshold(
         self,
@@ -376,12 +529,12 @@ class ROCCurve:
         tpr : float | NDArrayFloat | None = None,
     ) -> float | NDArrayFloat:
         return self._interpolate_generic(
-            x1          = fpr,
-            xp1         = self.fpr,
-            fp1         = self.thresholds,
-            x2          = tpr,
-            xp2         = self.tpr,
-            fp2         = self.thresholds,
+            x1  = fpr,
+            xp1 = self.fpr,
+            fp1 = self.thresholds,
+            x2  = tpr,
+            xp2 = self.tpr,
+            fp2 = self.thresholds,
         )
     def _interpolate_generic(self, x1, xp1, fp1, x2, xp2, fp2):
         if x1 is not None:
@@ -394,14 +547,14 @@ class ROCCurve:
                 f_from_x1 = f
                 # Interpolation from either source is possible so use results
                 # depending on when each is expected to give better results.
-                # TODO: Handle np.inf leading to RuntimeWarning
                 idx_after1 = np.searchsorted(xp1, x1)
                 idx_before1 = np.clip(idx_after1 - 1, 0, None)
-                slopes1 = (fp1[idx_after1]-fp1[idx_before1])/(xp1[idx_after1]-xp1[idx_before1])
                 idx_after2 = np.searchsorted(xp2, x2)
                 idx_before2 = np.clip(idx_after2 - 1, 0, None)
-                slopes2 = (fp2[idx_after2]-fp2[idx_before2])/(xp2[idx_after2]-xp2[idx_before2])
-                # print(f"""
+                with warnings.catch_warnings(action='ignore', category=RuntimeWarning):
+                    slopes1 = (fp1[idx_after1]-fp1[idx_before1])/(xp1[idx_after1]-xp1[idx_before1])
+                    slopes2 = (fp2[idx_after2]-fp2[idx_before2])/(xp2[idx_after2]-xp2[idx_before2])
+                # print(f"""DEBUG
                 # FPR
                 # \tIdx   : {idx_after1} {idx_before1}
                 # \tx     : {xp1[idx_after1]} {xp1[idx_before1]}
@@ -430,7 +583,7 @@ class ROCCurve:
 
     def compute_thresholds(
         self,
-        method : Literal['linear', 'log', 'percentile', 'evenly_spaced'],
+        method : ThresholdMethod,
         n_thresholds,
     ) -> tuple[NDArrayFloat, NDArrayFloat, NDArrayFloat]:
         thresholds_noinf = self.thresholds
@@ -458,26 +611,10 @@ class ROCCurve:
             fpr_interp, tpr_interp, _ = self.interpolate(thresholds=thr_to_plot)
         return fpr_interp, tpr_interp, thr_to_plot
 
-def roc_curve(
-    data = None,
-    *,
-    y_true = 'y_true',
-    y_score = 'y_score',
-    **kwargs,
-) -> pd.DataFrame:
-    '''Wrapper for sklearn.metrics.roc_curve that can accept and will always
-    return a DataFrame'''
-    data, (y_true, y_score) = _require_dataframe(data, y_true=y_true, y_score=y_score)
-    return pd.DataFrame(
-        data = np.column_stack(
-            sklearn.metrics.roc_curve(
-                y_true  = data[y_true],
-                y_score = data[y_score],
-                **kwargs,
-            )
-        ),
-        columns = ['fpr', 'tpr', 'thresholds'],
-    ).set_index('thresholds')
+def is_monotonic_increasing(arr):
+    return np.all(arr[1:] >= arr[:-1])
+def is_monotonic_decreasing(arr):
+    return np.all(arr[1:] <= arr[:-1])
 
 def bootstrap(
     data = None,
@@ -522,7 +659,7 @@ def merge_roc_curves(
 ) -> pd.DataFrame:
     if index is not None:
         roc_curves = [
-            df_.drop_duplicates(subset=index, keep='first').set_index(index)
+            df_.drop_duplicates(subset=index, keep='first').set_index(index, verify_integrity=True)
             for df_ in roc_curves
         ]
     return (
