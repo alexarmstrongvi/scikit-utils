@@ -21,7 +21,7 @@ outputs:
     pandas_format : parquet
     # Format in which to save plots
     # Choices: see matplotlib.Figure.savefig
-    image_format : png # Any format that can passed to matplotlib Figure.savefig
+    image_format : png
     # Save metrics and visuals as tensorboard log
     tensorboard : false
     # Toggles for which outputs to save
@@ -80,7 +80,9 @@ train_test_iterator : train_test_split
 train_on_all : false
 
 # Names for splits used in DataFrame columns. 'null' results in simple
-# enumeration.
+# enumeration. The default `split{}` follows the convention set by
+# hyperparameter search estimators (e.g. GridSearchCV) that autolabel split
+# specific cv results with that prefix (e.g. `split0_train_score').
 split_names: 'split{}'
 
 # Collapse predictions for each split into a single column (a.k.a.

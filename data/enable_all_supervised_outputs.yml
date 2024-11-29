@@ -1,4 +1,4 @@
-# NOTE: This needs to be manually kept in sync with fit_supervised_model.yml to
+# NOTE: This needs to be manually kept in sync with run_fit_supervised_model.yml to
 # include all possible toggles.
 outputs:
     toggles:

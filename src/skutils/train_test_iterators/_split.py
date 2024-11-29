@@ -236,7 +236,7 @@ def get_index_complement(indexes: Indexes, n_indexes: int) -> Indexes:
 ################################################################################
 # NOTE: Work in progress
 class AblatedRepeatedKFold:
-    """Repated KFold the number of folds decreases with repetion"""
+    """Repeated KFold where the number of folds decreases with repetition"""
     def __init__(
         self,
         n_splits: Sequence[int] = range(5,1),
